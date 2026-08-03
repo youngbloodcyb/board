@@ -1,20 +1,21 @@
+import { upload as uploadBlob } from "@vercel/blob/client";
 import type { XYPosition } from "@xyflow/react";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { NodeData, NodeType } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
+import { objectKeyFor } from "@/lib/blob";
 import type { NodeDraft } from "@/lib/board-utils";
 import {
   type BoardNode,
   DEFAULT_STYLE,
   nodeSize,
   toClientNodeData,
-  toStoredData,
   useBoardStore,
 } from "@/lib/store";
 import {
   createNode,
-  generateUploadUrl,
+  duplicateNode as duplicateNodeAction,
   patchImageNode,
   removeNode as removeNodeAction,
   updateNode,
@@ -70,18 +71,22 @@ export function useUpdateNodeData() {
  */
 export function useBoardActions(boardId: string) {
   const { data: session } = authClient.useSession();
+  const userId = session?.user?.id;
 
-  const upload = useCallback(async (file: File): Promise<string> => {
-    const url = await generateUploadUrl();
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": file.type },
-      body: file,
-    });
-    if (!res.ok) throw new Error("Upload failed");
-    const { storageId } = (await res.json()) as { storageId: string };
-    return storageId;
-  }, []);
+  const uploadFile = useCallback(
+    async (file: File): Promise<string> => {
+      if (!userId) throw new Error("Not signed in");
+      const pathname = objectKeyFor(userId, boardId);
+      const { pathname: stored } = await uploadBlob(pathname, file, {
+        access: "private",
+        handleUploadUrl: "/api/blob/upload",
+        clientPayload: boardId,
+        contentType: file.type,
+      });
+      return stored;
+    },
+    [userId, boardId],
+  );
 
   // Turn a detected draft into the stored node data, uploading files first.
   const draftToData = useCallback(
@@ -94,20 +99,20 @@ export function useBoardActions(boardId: string) {
         case "image":
           return {
             kind: "image",
-            storageId: await upload(draft.file),
+            objectKey: await uploadFile(draft.file),
             alt: draft.alt,
           };
         case "pdf":
           return "file" in draft
             ? {
                 kind: "pdf",
-                storageId: await upload(draft.file),
+                objectKey: await uploadFile(draft.file),
                 name: draft.name,
               }
             : { kind: "pdf", url: draft.url, name: draft.name };
       }
     },
-    [upload],
+    [uploadFile],
   );
 
   const addDraft = useCallback(
@@ -125,17 +130,17 @@ export function useBoardActions(boardId: string) {
           id: nodeId,
           type: draft.kind as NodeType,
           position,
-          data: toClientNodeData(data),
+          data: toClientNodeData(data, nodeId),
           style: DEFAULT_STYLE[draft.kind],
         } as BoardNode);
-        if (session?.user?.id) {
-          triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+        if (userId) {
+          triggerEmbed({ nodeId, boardId, userId, data });
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Couldn't add node");
       }
     },
-    [boardId, draftToData, session?.user?.id],
+    [boardId, draftToData, userId],
   );
 
   const moveNode = useCallback((nodeId: string, position: XYPosition) => {
@@ -160,11 +165,11 @@ export function useBoardActions(boardId: string) {
       updateNode({ nodeId, data }).catch((e) =>
         console.error("node update failed", e),
       );
-      if (session?.user?.id) {
-        triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+      if (userId) {
+        triggerEmbed({ nodeId, boardId, userId, data });
       }
     },
-    [boardId, session?.user?.id],
+    [boardId, userId],
   );
 
   const resizeNode = useCallback(
@@ -183,12 +188,10 @@ export function useBoardActions(boardId: string) {
   const duplicateNode = useCallback(
     async (node: BoardNode) => {
       try {
-        const data = toStoredData(node.data);
-        const nodeId = await createNode({
+        const { id: nodeId, data } = await duplicateNodeAction({
+          nodeId: node.id,
           boardId,
-          type: node.type,
           position: { x: node.position.x + 24, y: node.position.y + 24 },
-          data,
           style: nodeSize(node),
         });
         addNodeLocal({
@@ -197,8 +200,8 @@ export function useBoardActions(boardId: string) {
           position: { x: node.position.x + 24, y: node.position.y + 24 },
           selected: false,
         });
-        if (session?.user?.id) {
-          triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+        if (userId) {
+          triggerEmbed({ nodeId, boardId, userId, data });
         }
       } catch (err) {
         toast.error(
@@ -206,7 +209,7 @@ export function useBoardActions(boardId: string) {
         );
       }
     },
-    [boardId, session?.user?.id],
+    [boardId, userId],
   );
 
   const bringToFront = useCallback((node: BoardNode) => {
@@ -248,10 +251,10 @@ export function useBoardActions(boardId: string) {
       const file = new File([blob], "crop.png", {
         type: blob.type || "image/png",
       });
-      const storageId = await upload(file);
-      await patchImageNode({ nodeId, storageId });
+      const objectKey = await uploadFile(file);
+      await patchImageNode({ nodeId, objectKey });
     },
-    [upload],
+    [uploadFile],
   );
 
   return {

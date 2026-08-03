@@ -35,7 +35,6 @@ export type TextNodeData = {
 export type ImageNodeData = {
   kind: "image";
   objectKey?: string;
-  storageId?: string;
   url?: string;
   alt?: string;
   fit?: "cover" | "contain";
@@ -44,7 +43,6 @@ export type ImageNodeData = {
 export type PdfNodeData = {
   kind: "pdf";
   objectKey?: string;
-  storageId?: string;
   url?: string;
   name: string;
 };

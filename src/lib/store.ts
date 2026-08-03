@@ -4,7 +4,7 @@ import type { ClientNode, NodeData } from "@/db/schema";
 
 // The server (drizzle via src/services) is the source of truth. These types
 // match the resolved client view returned by `listNodesByBoard`, where
-// image/pdf `storageId | url` has already been collapsed into a `src` URL.
+// image/pdf `objectKey | url` has already been collapsed into a `src` URL.
 export type BoardNodeData = ClientNode["data"];
 
 // Per-kind narrowing of the data union, handy for components.
@@ -15,7 +15,7 @@ export type PdfNodeData = Extract<BoardNodeData, { kind: "pdf" }>;
 export type OgMeta = NonNullable<LinkNodeData["og"]>;
 
 // Kinds whose client and stored data shapes are identical, so they can be
-// edited in place (image/pdf differ — storageId/url vs resolved src).
+// edited in place (image/pdf differ — objectKey/url vs resolved src).
 export type EditableNodeData = LinkNodeData | TextNodeData;
 
 export type LinkNode = Node<LinkNodeData, "link">;
@@ -55,32 +55,25 @@ export const toBoardNode = (doc: ClientNode): BoardNode =>
     zIndex: doc.zIndex,
   }) as BoardNode;
 
-/** Client node data -> the STORED shape the create/update actions expect. */
-export const toStoredData = (data: BoardNodeData): NodeData => {
-  switch (data.kind) {
-    // Reference the same file by its resolved URL (storageId isn't on the
-    // client view); links/text are identical in both shapes.
-    case "image":
-      return { kind: "image", url: data.src, alt: data.alt };
-    case "pdf":
-      return { kind: "pdf", url: data.src, name: data.name };
-    default:
-      return data;
-  }
-};
-
 /** STORED node data -> the client shape the canvas renders (image/pdf src). */
-export const toClientNodeData = (data: NodeData): BoardNodeData => {
+export const toClientNodeData = (
+  data: NodeData,
+  nodeId: string,
+): BoardNodeData => {
   switch (data.kind) {
     case "image":
       return {
         kind: "image",
-        src: data.url ?? "",
+        src: data.objectKey ? `/api/files/${nodeId}` : (data.url ?? ""),
         alt: data.alt,
         fit: data.fit,
       };
     case "pdf":
-      return { kind: "pdf", src: data.url ?? "", name: data.name };
+      return {
+        kind: "pdf",
+        src: data.objectKey ? `/api/files/${nodeId}` : (data.url ?? ""),
+        name: data.name,
+      };
     default:
       return data;
   }

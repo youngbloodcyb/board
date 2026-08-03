@@ -2,8 +2,9 @@
 
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { type Board, boards } from "@/db/schema";
+import { type Board, boards, nodes } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
+import { deleteBlob, nodeObjectKey } from "@/lib/blob";
 
 export async function listBoards(): Promise<Board[]> {
   const user = await requireUser();
@@ -45,8 +46,15 @@ export async function updateBoard(
 
 export async function deleteBoard(boardId: string): Promise<void> {
   const user = await requireUser();
-  const result = await db
-    .delete(boards)
-    .where(and(eq(boards.id, boardId), eq(boards.userId, user.id)));
+  const owned = and(eq(boards.id, boardId), eq(boards.userId, user.id));
+  const rows = await db
+    .select({ data: nodes.data })
+    .from(nodes)
+    .where(and(eq(nodes.boardId, boardId), eq(nodes.userId, user.id)));
+  const keys = rows
+    .map((r) => nodeObjectKey(r.data as { kind: string; objectKey?: string }))
+    .filter((k): k is string => !!k);
+  const result = await db.delete(boards).where(owned);
   if (result.rowCount === 0) throw new Error("Board not found");
+  await Promise.all(keys.map(deleteBlob));
 }

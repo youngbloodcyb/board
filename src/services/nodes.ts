@@ -13,6 +13,7 @@ import {
   type StoredNode,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
+import { blobExists, deleteBlob, nodeObjectKey } from "@/lib/blob";
 
 async function requireOwnedBoard(
   boardId: string,
@@ -37,17 +38,21 @@ async function requireOwnedNode(nodeId: string, userId: string) {
   return rows[0];
 }
 
-function toClientData(data: NodeData): ClientNodeData {
+function toClientData(data: NodeData, nodeId: string): ClientNodeData {
   if (data.kind === "image") {
     return {
       kind: "image",
-      src: data.url ?? "",
+      src: data.objectKey ? `/api/files/${nodeId}` : (data.url ?? ""),
       alt: data.alt,
       fit: data.fit,
     };
   }
   if (data.kind === "pdf") {
-    return { kind: "pdf", src: data.url ?? "", name: data.name };
+    return {
+      kind: "pdf",
+      src: data.objectKey ? `/api/files/${nodeId}` : (data.url ?? ""),
+      name: data.name,
+    };
   }
   return data;
 }
@@ -62,7 +67,7 @@ function toClientNode(row: StoredNode): ClientNode {
         ? { width: row.width, height: row.height }
         : undefined,
     zIndex: row.zIndex ?? undefined,
-    data: toClientData(row.data),
+    data: toClientData(row.data, row.id),
   };
 }
 
@@ -84,6 +89,13 @@ export async function createNode(input: {
 }): Promise<string> {
   const user = await requireUser();
   await requireOwnedBoard(input.boardId, user.id);
+
+  const key = nodeObjectKey(input.data);
+  if (key) {
+    const exists = await blobExists(key);
+    if (!exists) throw new Error("Upload not found");
+  }
+
   const id = crypto.randomUUID();
   await db.insert(nodes).values({
     id,
@@ -125,33 +137,58 @@ export async function updateNode(input: {
 export async function patchImageNode(input: {
   nodeId: string;
   fit?: "cover" | "contain";
-  storageId?: string;
+  objectKey?: string;
 }): Promise<void> {
   const user = await requireUser();
   const node = await requireOwnedNode(input.nodeId, user.id);
   if (node.data.kind !== "image") return;
 
   const next = { ...node.data };
+  let oldKey: string | undefined;
   if (input.fit !== undefined) next.fit = input.fit;
-  if (input.storageId !== undefined) {
-    next.storageId = input.storageId;
+  if (input.objectKey !== undefined) {
+    if (next.objectKey) oldKey = next.objectKey;
+    next.objectKey = input.objectKey;
     next.url = undefined;
   }
+
   await db
     .update(nodes)
     .set({ data: next, updatedAt: new Date() })
     .where(eq(nodes.id, input.nodeId));
+
+  if (oldKey) await deleteBlob(oldKey);
 }
 
 export async function removeNode(nodeId: string): Promise<void> {
   const user = await requireUser();
-  await requireOwnedNode(nodeId, user.id);
+  const node = await requireOwnedNode(nodeId, user.id);
+  const key = nodeObjectKey(node.data as NodeData);
   await db.delete(nodes).where(eq(nodes.id, nodeId));
+  if (key) await deleteBlob(key);
 }
 
-export async function generateUploadUrl(): Promise<string> {
-  await requireUser();
-  throw new Error(
-    "generateUploadUrl is not implemented — no file storage backend is configured",
-  );
+export async function duplicateNode(input: {
+  nodeId: string;
+  boardId: string;
+  position: { x: number; y: number };
+  style?: { width: number; height: number };
+}): Promise<{ id: string; data: NodeData }> {
+  const user = await requireUser();
+  const src = await requireOwnedNode(input.nodeId, user.id);
+  await requireOwnedBoard(input.boardId, user.id);
+  const id = crypto.randomUUID();
+  await db.insert(nodes).values({
+    id,
+    boardId: input.boardId,
+    userId: user.id,
+    type: src.type,
+    positionX: input.position.x,
+    positionY: input.position.y,
+    width: input.style?.width ?? src.width ?? undefined,
+    height: input.style?.height ?? src.height ?? undefined,
+    zIndex: src.zIndex ?? undefined,
+    data: src.data,
+  });
+  return { id, data: src.data as NodeData };
 }
