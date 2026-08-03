@@ -21,6 +21,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "~/*": ["./convex/*"],
+      "@workflows/*": ["./workflows/*"],
     },
   },
   "include": [

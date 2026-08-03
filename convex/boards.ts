@@ -1,5 +1,5 @@
-import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 import { authComponent } from "./betterAuth/auth";
 
 export const list = query({
@@ -50,21 +50,12 @@ export const remove = mutation({
     const user = await authComponent.getAuthUser(ctx);
     const board = await ctx.db.get(boardId);
     if (!board || board.userId !== user._id) throw new Error("Not found");
-    // Cascade: delete the board's nodes and their embeddings too.
+    // Cascade: delete the board's nodes.
     const nodes = await ctx.db
       .query("nodes")
       .withIndex("by_board", (q) => q.eq("boardId", boardId))
       .collect();
-    await Promise.all(
-      nodes.map(async (n) => {
-        const emb = await ctx.db
-          .query("embeddings")
-          .withIndex("by_node", (q) => q.eq("nodeId", n._id))
-          .unique();
-        if (emb) await ctx.db.delete(emb._id);
-        await ctx.db.delete(n._id);
-      }),
-    );
+    await Promise.all(nodes.map((n) => ctx.db.delete(n._id)));
     await ctx.db.delete(boardId);
   },
 });

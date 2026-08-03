@@ -1,10 +1,9 @@
-import { internalQuery, mutation, query } from "./_generated/server";
-import { v, type Infer } from "convex/values";
-import { internal } from "./_generated/api";
-import { authComponent } from "./betterAuth/auth";
-import { nodeData, nodeType } from "./schema";
+import { type Infer, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
+import { authComponent } from "./betterAuth/auth";
+import { nodeData, nodeType } from "./schema";
 
 // Handy TS types derived from the validators (source of truth lives in schema).
 export type NodeData = Infer<typeof nodeData>;
@@ -83,8 +82,6 @@ export const create = mutation({
       userId: user._id,
       ...node,
     });
-    // Kick off embedding in the background (actions can call the API).
-    await ctx.scheduler.runAfter(0, internal.embeddings.embedNode, { nodeId });
     return nodeId;
   },
 });
@@ -111,10 +108,6 @@ export const update = mutation({
     const node = await ctx.db.get(nodeId);
     if (!node || node.userId !== user._id) throw new Error("Node not found");
     await ctx.db.patch(nodeId, patch);
-    // Re-embed only when the content changed (not on move/resize/reorder).
-    if (patch.data !== undefined) {
-      await ctx.scheduler.runAfter(0, internal.embeddings.embedNode, { nodeId });
-    }
   },
 });
 
@@ -159,12 +152,6 @@ export const remove = mutation({
     ) {
       await ctx.storage.delete(node.data.storageId);
     }
-    // Drop its embedding too.
-    const emb = await ctx.db
-      .query("embeddings")
-      .withIndex("by_node", (q) => q.eq("nodeId", nodeId))
-      .unique();
-    if (emb) await ctx.db.delete(emb._id);
     await ctx.db.delete(nodeId);
   },
 });

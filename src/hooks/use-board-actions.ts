@@ -2,9 +2,7 @@ import type { XYPosition } from "@xyflow/react";
 import { useMutation } from "convex/react";
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { api } from "~/_generated/api";
-import type { Id } from "~/_generated/dataModel";
-import type { NodeData, NodeType } from "~/nodes";
+import { authClient } from "@/lib/auth-client";
 import type { NodeDraft } from "@/lib/board-utils";
 import {
   type BoardNode,
@@ -13,17 +11,45 @@ import {
   toStoredData,
   useBoardStore,
 } from "@/lib/store";
+import { api } from "~/_generated/api";
+import type { Id } from "~/_generated/dataModel";
+import type { NodeData, NodeType } from "~/nodes";
+
+function triggerEmbed(params: {
+  nodeId: string;
+  boardId: string;
+  userId: string;
+  data: NodeData;
+}) {
+  fetch("/api/embed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }).catch((err) => console.error("embed trigger failed", err));
+}
+
+function triggerEmbedDelete(nodeId: string) {
+  fetch(`/api/embed/${nodeId}`, { method: "DELETE" }).catch((err) =>
+    console.error("embed delete failed", err),
+  );
+}
 
 /**
  * Standalone data-only update, for nodes that edit their own payload (e.g. a
  * link node backfilling OG metadata) and don't have a board id in scope.
  */
 export function useUpdateNodeData() {
+  const { data: session } = authClient.useSession();
+  const boardId = useBoardStore((s) => s.nodesBoardId);
   const update = useMutation(api.nodes.update);
   return useCallback(
-    (nodeId: string, data: NodeData) =>
-      update({ nodeId: nodeId as Id<"nodes">, data }),
-    [update],
+    (nodeId: string, data: NodeData) => {
+      update({ nodeId: nodeId as Id<"nodes">, data });
+      if (session?.user?.id && boardId) {
+        triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+      }
+    },
+    [update, session?.user?.id, boardId],
   );
 }
 
@@ -32,6 +58,7 @@ export function useUpdateNodeData() {
  * upload-then-create flow and optimistic cache updates live in one place.
  */
 export function useBoardActions(boardId: Id<"boards">) {
+  const { data: session } = authClient.useSession();
   const create = useMutation(api.nodes.create);
   const generateUploadUrl = useMutation(api.nodes.generateUploadUrl);
 
@@ -157,18 +184,21 @@ export function useBoardActions(boardId: Id<"boards">) {
     async (draft: NodeDraft, position: XYPosition) => {
       try {
         const data = await draftToData(draft);
-        await create({
+        const nodeId = await create({
           boardId,
           type: draft.kind as NodeType,
           position,
           data,
           style: DEFAULT_STYLE[draft.kind],
         });
+        if (session?.user?.id) {
+          triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Couldn't add node");
       }
     },
-    [boardId, create, draftToData],
+    [boardId, create, draftToData, session?.user?.id],
   );
 
   const moveNode = useCallback(
@@ -178,14 +208,21 @@ export function useBoardActions(boardId: Id<"boards">) {
   );
 
   const removeNode = useCallback(
-    (nodeId: string) => destroy({ nodeId: nodeId as Id<"nodes"> }),
+    (nodeId: string) => {
+      destroy({ nodeId: nodeId as Id<"nodes"> });
+      triggerEmbedDelete(nodeId);
+    },
     [destroy],
   );
 
   const setNodeData = useCallback(
-    (nodeId: string, data: NodeData) =>
-      update({ nodeId: nodeId as Id<"nodes">, data }),
-    [update],
+    (nodeId: string, data: NodeData) => {
+      update({ nodeId: nodeId as Id<"nodes">, data });
+      if (session?.user?.id) {
+        triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+      }
+    },
+    [update, boardId, session?.user?.id],
   );
 
   const resizeNode = useCallback(
@@ -198,15 +235,20 @@ export function useBoardActions(boardId: Id<"boards">) {
   );
 
   const duplicateNode = useCallback(
-    (node: BoardNode) =>
-      create({
+    async (node: BoardNode) => {
+      const data = toStoredData(node.data);
+      const nodeId = await create({
         boardId,
         type: node.type,
         position: { x: node.position.x + 24, y: node.position.y + 24 },
-        data: toStoredData(node.data),
+        data,
         style: nodeSize(node),
-      }),
-    [boardId, create],
+      });
+      if (session?.user?.id) {
+        triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+      }
+    },
+    [boardId, create, session?.user?.id],
   );
 
   const bringToFront = useCallback(
