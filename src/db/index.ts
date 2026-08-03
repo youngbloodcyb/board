@@ -1,4 +1,5 @@
 // db/index.ts
+import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { Signer } from '@aws-sdk/rds-signer';
@@ -29,4 +30,6 @@ const pool = new Pool({
 
 attachDatabasePool(pool);
 
-export const db = drizzle({ client: pool, schema });
+const relations = defineRelations(schema);
+
+export const db = drizzle({ client: pool, relations });
