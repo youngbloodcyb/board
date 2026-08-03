@@ -1,19 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { actionsFor, type ActionCtx } from "@/components/node-actions";
+import { type ActionCtx, actionsFor } from "@/components/node-actions";
 import { Button } from "@/components/ui/button";
 import { useBoardActions } from "@/hooks/use-board-actions";
 import { useEditNodeData } from "@/hooks/use-edit-node-data";
 import { useBoardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { Id } from "~/_generated/dataModel";
 
 /**
  * Vertical, right-side dock of actions for the selected node. Visible only when
  * exactly one node is selected; the available icons depend on the node's kind.
  */
-export function NodeDock({ boardId }: { boardId: Id<"boards"> }) {
+export function NodeDock({ boardId }: { boardId: string }) {
   const selectedNode = useBoardStore((s) => s.selectedNode);
   const openTextEditor = useBoardStore((s) => s.openTextEditor);
   const openImageCrop = useBoardStore((s) => s.openImageCrop);

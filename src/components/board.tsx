@@ -6,9 +6,8 @@ import {
   ReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
-import { useQuery } from "convex/react";
 import Link from "next/link";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { DockMenu } from "@/components/dock-menu";
 import { ImageCropDialog } from "@/components/image-crop-dialog";
@@ -17,16 +16,16 @@ import { NodeDock } from "@/components/node-dock";
 import { nodeTypes } from "@/components/nodes";
 import { TextEditorDrawer } from "@/components/text-editor-drawer";
 import { Button } from "@/components/ui/button";
+import type { Board as BoardRow } from "@/db/schema";
 import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardSync } from "@/hooks/use-board-sync";
 import { useCanvasInputs } from "@/hooks/use-canvas-inputs";
 import { type BoardNode, useBoardStore } from "@/lib/store";
-import { api } from "~/_generated/api";
-import type { Id } from "~/_generated/dataModel";
+import { getBoard } from "@/services/boards";
 
 const proOptions = { hideAttribution: true };
 
-function BoardCanvas({ boardId }: { boardId: Id<"boards"> }) {
+function BoardCanvas({ boardId }: { boardId: string }) {
   const ready = useBoardSync(boardId);
   const { moveNode, removeNode, resizeNode } = useBoardActions(boardId);
   const { nodes, onNodesChange: applyChanges } = useBoardStore(
@@ -75,9 +74,11 @@ function BoardCanvas({ boardId }: { boardId: Id<"boards"> }) {
         nodes={nodes}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
-        onNodeDragStop={(_, __, dragged) =>
-          dragged.forEach((n) => moveNode(n.id, n.position))
-        }
+        onNodeDragStop={(_, __, dragged) => {
+          dragged.forEach((n) => {
+            moveNode(n.id, n.position);
+          });
+        }}
         fitView
         proOptions={proOptions}
       >
@@ -102,9 +103,20 @@ function BoardNotFound() {
   );
 }
 
-export function Board({ boardId }: { boardId: Id<"boards"> }) {
-  // Verifies access too: boards.get returns null for missing/unowned boards.
-  const board = useQuery(api.boards.get, { boardId });
+export function Board({ boardId }: { boardId: string }) {
+  // Verifies access too: getBoard returns null for missing/unowned boards.
+  const [board, setBoard] = useState<BoardRow | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBoard(boardId).then((b) => {
+      if (!cancelled) setBoard(b);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId]);
+
   if (board === undefined) return <Loading />;
   if (board === null) return <BoardNotFound />;
   return (

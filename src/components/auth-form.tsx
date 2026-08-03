@@ -57,8 +57,8 @@ function AuthFormInner({
           password: values.password,
         });
 
-    // On success the ConvexBetterAuthProvider picks up the token and the
-    // <Authenticated> gate swaps in the board — no manual redirect needed.
+    // On success the session refreshes reactively (authClient.useSession in
+    // the AuthGate) and the board swaps in — no manual redirect needed.
     if (res.error) {
       toast.error(res.error.message ?? "Something went wrong");
       return;

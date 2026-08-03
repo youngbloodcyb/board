@@ -1,19 +1,29 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Loading } from "@/components/loading";
 import { Button } from "@/components/ui/button";
-import { api } from "~/_generated/api";
+import type { Board } from "@/db/schema";
+import { createBoard, listBoards } from "@/services/boards";
 
 export default function BoardsPage() {
-  const boards = useQuery(api.boards.list);
-  const createBoard = useMutation(api.boards.create);
+  const [boards, setBoards] = useState<Board[] | undefined>(undefined);
   const router = useRouter();
 
+  useEffect(() => {
+    let cancelled = false;
+    listBoards().then((b) => {
+      if (!cancelled) setBoards(b);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const onCreate = async () => {
-    const id = await createBoard({ name: "Untitled board" });
+    const id = await createBoard("Untitled board");
     router.push(`/${id}`);
   };
 
@@ -33,14 +43,14 @@ export default function BoardsPage() {
       ) : (
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {boards.map((b) => (
-            <li key={b._id}>
+            <li key={b.id}>
               <Link
-                href={`/${b._id}`}
+                href={`/${b.id}`}
                 className="flex aspect-[4/3] flex-col justify-end rounded-lg border bg-card p-4 transition-colors hover:bg-muted"
               >
                 <div className="truncate text-sm font-medium">{b.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {new Date(b._creationTime).toLocaleDateString()}
+                  {new Date(b.createdAt).toLocaleDateString()}
                 </div>
               </Link>
             </li>

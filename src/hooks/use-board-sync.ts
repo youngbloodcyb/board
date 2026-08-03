@@ -1,25 +1,35 @@
-import { useQuery } from "convex/react";
-import { useEffect } from "react";
-import { api } from "~/_generated/api";
-import type { Id } from "~/_generated/dataModel";
+import { useEffect, useState } from "react";
 import { toBoardNode, useBoardStore } from "@/lib/store";
+import { listNodesByBoard } from "@/services/nodes";
 
 /**
- * Subscribes to the board's nodes and mirrors the live query into the local
- * store. Convex is the source of truth; the store is just the interaction
- * cache React Flow renders from.
+ * Loads the board's nodes from the server and mirrors them into the local
+ * store. The server (drizzle) is the source of truth; the store is just the
+ * interaction cache React Flow renders from.
  */
-export function useBoardSync(boardId: Id<"boards">) {
-  const remote = useQuery(api.nodes.listByBoard, { boardId });
+export function useBoardSync(boardId: string) {
   const setNodes = useBoardStore((s) => s.setNodes);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!remote) return;
-    setNodes(boardId, remote.map(toBoardNode));
-  }, [remote, boardId, setNodes]);
+    let cancelled = false;
+    setLoading(true);
+    listNodesByBoard(boardId)
+      .then((remote) => {
+        if (cancelled) return;
+        setNodes(boardId, remote.map(toBoardNode));
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [boardId, setNodes]);
 
   // Ready only once the store actually holds THIS board's nodes. On a board
   // switch the store still tags the previous board, so this stays false until
-  // the effect above runs — preventing a flash of the old board.
-  return useBoardStore((s) => s.nodesBoardId === boardId);
+  // the load above completes — preventing a flash of the old board.
+  return useBoardStore((s) => !loading && s.nodesBoardId === boardId);
 }

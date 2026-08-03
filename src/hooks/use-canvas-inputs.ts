@@ -1,14 +1,13 @@
 import { useReactFlow, type XYPosition } from "@xyflow/react";
 import { useCallback, useEffect } from "react";
+import { useBoardActions } from "@/hooks/use-board-actions";
 import {
   detectFromFile,
   detectFromText,
   isEditableTarget,
 } from "@/lib/board-utils";
-import { useBoardActions } from "@/hooks/use-board-actions";
-import type { Id } from "~/_generated/dataModel";
 
-export function useCanvasInputs(boardId: Id<"boards">) {
+export function useCanvasInputs(boardId: string) {
   const { addDraft } = useBoardActions(boardId);
   const { screenToFlowPosition } = useReactFlow();
 

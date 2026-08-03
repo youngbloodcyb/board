@@ -1,19 +1,24 @@
 import type { XYPosition } from "@xyflow/react";
-import { useMutation } from "convex/react";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import type { NodeData, NodeType } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import type { NodeDraft } from "@/lib/board-utils";
 import {
   type BoardNode,
   DEFAULT_STYLE,
   nodeSize,
+  toClientNodeData,
   toStoredData,
   useBoardStore,
 } from "@/lib/store";
-import { api } from "~/_generated/api";
-import type { Id } from "~/_generated/dataModel";
-import type { NodeData, NodeType } from "~/nodes";
+import {
+  createNode,
+  generateUploadUrl,
+  patchImageNode,
+  removeNode as removeNodeAction,
+  updateNode,
+} from "@/services/nodes";
 
 function triggerEmbed(params: {
   nodeId: string;
@@ -34,6 +39,11 @@ function triggerEmbedDelete(nodeId: string) {
   );
 }
 
+/** Add a freshly created node to the local store so it shows immediately. */
+function addNodeLocal(node: BoardNode) {
+  useBoardStore.setState((s) => ({ nodes: [...s.nodes, node] }));
+}
+
 /**
  * Standalone data-only update, for nodes that edit their own payload (e.g. a
  * link node backfilling OG metadata) and don't have a board id in scope.
@@ -41,15 +51,16 @@ function triggerEmbedDelete(nodeId: string) {
 export function useUpdateNodeData() {
   const { data: session } = authClient.useSession();
   const boardId = useBoardStore((s) => s.nodesBoardId);
-  const update = useMutation(api.nodes.update);
   return useCallback(
     (nodeId: string, data: NodeData) => {
-      update({ nodeId: nodeId as Id<"nodes">, data });
+      updateNode({ nodeId, data }).catch((e) =>
+        console.error("node update failed", e),
+      );
       if (session?.user?.id && boardId) {
         triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
       }
     },
-    [update, session?.user?.id, boardId],
+    [session?.user?.id, boardId],
   );
 }
 
@@ -57,101 +68,20 @@ export function useUpdateNodeData() {
  * Write actions for a board. All node mutations funnel through here so the
  * upload-then-create flow and optimistic cache updates live in one place.
  */
-export function useBoardActions(boardId: Id<"boards">) {
+export function useBoardActions(boardId: string) {
   const { data: session } = authClient.useSession();
-  const create = useMutation(api.nodes.create);
-  const generateUploadUrl = useMutation(api.nodes.generateUploadUrl);
 
-  const move = useMutation(api.nodes.update).withOptimisticUpdate(
-    (localStore, { nodeId, position }) => {
-      if (!position) return;
-      const cur = localStore.getQuery(api.nodes.listByBoard, { boardId });
-      if (!cur) return;
-      localStore.setQuery(
-        api.nodes.listByBoard,
-        { boardId },
-        cur.map((n) => (n._id === nodeId ? { ...n, position } : n)),
-      );
-    },
-  );
-
-  const update = useMutation(api.nodes.update);
-
-  const resize = useMutation(api.nodes.update).withOptimisticUpdate(
-    (localStore, { nodeId, style, position }) => {
-      const cur = localStore.getQuery(api.nodes.listByBoard, { boardId });
-      if (!cur) return;
-      localStore.setQuery(
-        api.nodes.listByBoard,
-        { boardId },
-        cur.map((n) =>
-          n._id === nodeId
-            ? {
-                ...n,
-                style: style ?? n.style,
-                position: position ?? n.position,
-              }
-            : n,
-        ),
-      );
-    },
-  );
-
-  const reorder = useMutation(api.nodes.update).withOptimisticUpdate(
-    (localStore, { nodeId, zIndex }) => {
-      const cur = localStore.getQuery(api.nodes.listByBoard, { boardId });
-      if (!cur) return;
-      localStore.setQuery(
-        api.nodes.listByBoard,
-        { boardId },
-        cur.map((n) => (n._id === nodeId ? { ...n, zIndex } : n)),
-      );
-    },
-  );
-
-  const destroy = useMutation(api.nodes.remove).withOptimisticUpdate(
-    (localStore, { nodeId }) => {
-      const cur = localStore.getQuery(api.nodes.listByBoard, { boardId });
-      if (!cur) return;
-      localStore.setQuery(
-        api.nodes.listByBoard,
-        { boardId },
-        cur.filter((n) => n._id !== nodeId),
-      );
-    },
-  );
-
-  const patchImg = useMutation(api.nodes.patchImage).withOptimisticUpdate(
-    (localStore, { nodeId, fit }) => {
-      if (fit === undefined) return; // storageId change shows after refetch
-      const cur = localStore.getQuery(api.nodes.listByBoard, { boardId });
-      if (!cur) return;
-      localStore.setQuery(
-        api.nodes.listByBoard,
-        { boardId },
-        cur.map((n) =>
-          n._id === nodeId && n.data.kind === "image"
-            ? { ...n, data: { ...n.data, fit } }
-            : n,
-        ),
-      );
-    },
-  );
-
-  const upload = useCallback(
-    async (file: File): Promise<Id<"_storage">> => {
-      const url = await generateUploadUrl();
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-      return storageId;
-    },
-    [generateUploadUrl],
-  );
+  const upload = useCallback(async (file: File): Promise<string> => {
+    const url = await generateUploadUrl();
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": file.type },
+      body: file,
+    });
+    if (!res.ok) throw new Error("Upload failed");
+    const { storageId } = (await res.json()) as { storageId: string };
+    return storageId;
+  }, []);
 
   // Turn a detected draft into the stored node data, uploading files first.
   const draftToData = useCallback(
@@ -184,13 +114,20 @@ export function useBoardActions(boardId: Id<"boards">) {
     async (draft: NodeDraft, position: XYPosition) => {
       try {
         const data = await draftToData(draft);
-        const nodeId = await create({
+        const nodeId = await createNode({
           boardId,
           type: draft.kind as NodeType,
           position,
           data,
           style: DEFAULT_STYLE[draft.kind],
         });
+        addNodeLocal({
+          id: nodeId,
+          type: draft.kind as NodeType,
+          position,
+          data: toClientNodeData(data),
+          style: DEFAULT_STYLE[draft.kind],
+        } as BoardNode);
         if (session?.user?.id) {
           triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
         }
@@ -198,31 +135,36 @@ export function useBoardActions(boardId: Id<"boards">) {
         toast.error(err instanceof Error ? err.message : "Couldn't add node");
       }
     },
-    [boardId, create, draftToData, session?.user?.id],
+    [boardId, draftToData, session?.user?.id],
   );
 
-  const moveNode = useCallback(
-    (nodeId: string, position: XYPosition) =>
-      move({ nodeId: nodeId as Id<"nodes">, position }),
-    [move],
-  );
+  const moveNode = useCallback((nodeId: string, position: XYPosition) => {
+    updateNode({ nodeId, position }).catch((e) =>
+      console.error("node move failed", e),
+    );
+  }, []);
 
-  const removeNode = useCallback(
-    (nodeId: string) => {
-      destroy({ nodeId: nodeId as Id<"nodes"> });
-      triggerEmbedDelete(nodeId);
-    },
-    [destroy],
-  );
+  const removeNode = useCallback((nodeId: string) => {
+    useBoardStore.setState((s) => ({
+      nodes: s.nodes.filter((n) => n.id !== nodeId),
+      selectedNode: s.selectedNode?.id === nodeId ? null : s.selectedNode,
+    }));
+    removeNodeAction(nodeId).catch((e) =>
+      console.error("node remove failed", e),
+    );
+    triggerEmbedDelete(nodeId);
+  }, []);
 
   const setNodeData = useCallback(
     (nodeId: string, data: NodeData) => {
-      update({ nodeId: nodeId as Id<"nodes">, data });
+      updateNode({ nodeId, data }).catch((e) =>
+        console.error("node update failed", e),
+      );
       if (session?.user?.id) {
         triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
       }
     },
-    [update, boardId, session?.user?.id],
+    [boardId, session?.user?.id],
   );
 
   const resizeNode = useCallback(
@@ -230,42 +172,73 @@ export function useBoardActions(boardId: Id<"boards">) {
       nodeId: string,
       style: { width: number; height: number },
       position?: XYPosition,
-    ) => resize({ nodeId: nodeId as Id<"nodes">, style, position }),
-    [resize],
+    ) => {
+      updateNode({ nodeId, style, position }).catch((e) =>
+        console.error("node resize failed", e),
+      );
+    },
+    [],
   );
 
   const duplicateNode = useCallback(
     async (node: BoardNode) => {
-      const data = toStoredData(node.data);
-      const nodeId = await create({
-        boardId,
-        type: node.type,
-        position: { x: node.position.x + 24, y: node.position.y + 24 },
-        data,
-        style: nodeSize(node),
-      });
-      if (session?.user?.id) {
-        triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+      try {
+        const data = toStoredData(node.data);
+        const nodeId = await createNode({
+          boardId,
+          type: node.type,
+          position: { x: node.position.x + 24, y: node.position.y + 24 },
+          data,
+          style: nodeSize(node),
+        });
+        addNodeLocal({
+          ...node,
+          id: nodeId,
+          position: { x: node.position.x + 24, y: node.position.y + 24 },
+          selected: false,
+        });
+        if (session?.user?.id) {
+          triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+        }
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't duplicate node",
+        );
       }
     },
-    [boardId, create, session?.user?.id],
+    [boardId, session?.user?.id],
   );
 
-  const bringToFront = useCallback(
-    (node: BoardNode) => {
-      const maxZ = Math.max(
-        0,
-        ...useBoardStore.getState().nodes.map((n) => n.zIndex ?? 0),
-      );
-      return reorder({ nodeId: node.id as Id<"nodes">, zIndex: maxZ + 1 });
-    },
-    [reorder],
-  );
+  const bringToFront = useCallback((node: BoardNode) => {
+    const maxZ = Math.max(
+      0,
+      ...useBoardStore.getState().nodes.map((n) => n.zIndex ?? 0),
+    );
+    const nextZ = maxZ + 1;
+    useBoardStore.setState((s) => ({
+      nodes: s.nodes.map((n) =>
+        n.id === node.id ? { ...n, zIndex: nextZ } : n,
+      ),
+    }));
+    updateNode({ nodeId: node.id, zIndex: nextZ }).catch((e) =>
+      console.error("node reorder failed", e),
+    );
+  }, []);
 
   const setImageFit = useCallback(
-    (nodeId: string, fit: "cover" | "contain") =>
-      patchImg({ nodeId: nodeId as Id<"nodes">, fit }),
-    [patchImg],
+    (nodeId: string, fit: "cover" | "contain") => {
+      useBoardStore.setState((s) => ({
+        nodes: s.nodes.map((n) =>
+          n.id === nodeId && n.data.kind === "image"
+            ? ({ ...n, data: { ...n.data, fit } } as BoardNode)
+            : n,
+        ),
+      }));
+      patchImageNode({ nodeId, fit }).catch((e) =>
+        console.error("image fit failed", e),
+      );
+    },
+    [],
   );
 
   // Upload a cropped data URL as a new file and point the node at it.
@@ -276,9 +249,9 @@ export function useBoardActions(boardId: Id<"boards">) {
         type: blob.type || "image/png",
       });
       const storageId = await upload(file);
-      await patchImg({ nodeId: nodeId as Id<"nodes">, storageId });
+      await patchImageNode({ nodeId, storageId });
     },
-    [patchImg, upload],
+    [upload],
   );
 
   return {

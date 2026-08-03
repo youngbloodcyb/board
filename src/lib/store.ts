@@ -1,15 +1,10 @@
 import { applyNodeChanges, type Node, type NodeChange } from "@xyflow/react";
-import type { FunctionReturnType } from "convex/server";
 import { create } from "zustand";
-import type { api } from "~/_generated/api";
-import type { NodeData } from "~/nodes";
+import type { ClientNode, NodeData } from "@/db/schema";
 
-// Convex is the source of truth. These types are derived from what
-// `nodes.listByBoard` returns — i.e. the resolved client view, where image/pdf
-// `storageId | url` has already been collapsed into a `src` URL by the server.
-export type ClientNode = FunctionReturnType<
-  typeof api.nodes.listByBoard
->[number];
+// The server (drizzle via src/services) is the source of truth. These types
+// match the resolved client view returned by `listNodesByBoard`, where
+// image/pdf `storageId | url` has already been collapsed into a `src` URL.
 export type BoardNodeData = ClientNode["data"];
 
 // Per-kind narrowing of the data union, handy for components.
@@ -49,10 +44,10 @@ const soleSelected = (nodes: BoardNode[]): BoardNode | null => {
   return selected.length === 1 ? selected[0] : null;
 };
 
-/** Convex query row -> React Flow node (id comes from the Convex _id). */
+/** Server row -> React Flow node (id comes from the row's id). */
 export const toBoardNode = (doc: ClientNode): BoardNode =>
   ({
-    id: doc._id,
+    id: doc.id,
     type: doc.type,
     position: doc.position,
     data: doc.data,
@@ -60,7 +55,7 @@ export const toBoardNode = (doc: ClientNode): BoardNode =>
     zIndex: doc.zIndex,
   }) as BoardNode;
 
-/** Client node data -> the STORED shape the create/update mutations expect. */
+/** Client node data -> the STORED shape the create/update actions expect. */
 export const toStoredData = (data: BoardNodeData): NodeData => {
   switch (data.kind) {
     // Reference the same file by its resolved URL (storageId isn't on the
@@ -74,8 +69,27 @@ export const toStoredData = (data: BoardNodeData): NodeData => {
   }
 };
 
+/** STORED node data -> the client shape the canvas renders (image/pdf src). */
+export const toClientNodeData = (data: NodeData): BoardNodeData => {
+  switch (data.kind) {
+    case "image":
+      return {
+        kind: "image",
+        src: data.url ?? "",
+        alt: data.alt,
+        fit: data.fit,
+      };
+    case "pdf":
+      return { kind: "pdf", src: data.url ?? "", name: data.name };
+    default:
+      return data;
+  }
+};
+
 /** Current rendered size of a node, falling back to its kind's default. */
-export const nodeSize = (node: BoardNode): { width: number; height: number } => {
+export const nodeSize = (
+  node: BoardNode,
+): { width: number; height: number } => {
   const style = node.style as { width?: number; height?: number } | undefined;
   const def = DEFAULT_STYLE[node.type];
   return {

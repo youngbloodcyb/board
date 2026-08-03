@@ -13,7 +13,7 @@ export function useEditNodeData() {
   return useCallback(
     (id: string, data: EditableNodeData) => {
       updateNodeData(id, data); // instant, local
-      persist(id, data); // to Convex
+      persist(id, data); // to the server
     },
     [updateNodeData, persist],
   );

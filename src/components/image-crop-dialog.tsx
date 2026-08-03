@@ -17,15 +17,13 @@ import {
 } from "@/components/ui/dialog";
 import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardStore } from "@/lib/store";
-import { cn } from "@/lib/utils";
-import type { Id } from "~/_generated/dataModel";
 
 const FIT_OPTIONS = [
   { value: "cover", label: "Fill" },
   { value: "contain", label: "Fit" },
 ] as const;
 
-export function ImageCropDialog({ boardId }: { boardId: Id<"boards"> }) {
+export function ImageCropDialog({ boardId }: { boardId: string }) {
   const croppingId = useBoardStore((s) => s.croppingImageNodeId);
   const closeImageCrop = useBoardStore((s) => s.closeImageCrop);
   const nodes = useBoardStore((s) => s.nodes);
