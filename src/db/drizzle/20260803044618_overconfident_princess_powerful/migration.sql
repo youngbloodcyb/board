@@ -1,3 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS vector;--> statement-breakpoint
 CREATE TYPE "node_type" AS ENUM('link', 'text', 'image', 'pdf');--> statement-breakpoint
 CREATE TABLE "account" (
 	"id" text PRIMARY KEY,
