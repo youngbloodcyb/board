@@ -24,7 +24,6 @@ import {
 function triggerEmbed(params: {
   nodeId: string;
   boardId: string;
-  userId: string;
   data: NodeData;
 }) {
   fetch("/api/embed", {
@@ -58,7 +57,7 @@ export function useUpdateNodeData() {
         console.error("node update failed", e),
       );
       if (session?.user?.id && boardId) {
-        triggerEmbed({ nodeId, boardId, userId: session.user.id, data });
+        triggerEmbed({ nodeId, boardId, data });
       }
     },
     [session?.user?.id, boardId],
@@ -134,7 +133,7 @@ export function useBoardActions(boardId: string) {
           style: DEFAULT_STYLE[draft.kind],
         } as BoardNode);
         if (userId) {
-          triggerEmbed({ nodeId, boardId, userId, data });
+          triggerEmbed({ nodeId, boardId, data });
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Couldn't add node");
@@ -166,7 +165,7 @@ export function useBoardActions(boardId: string) {
         console.error("node update failed", e),
       );
       if (userId) {
-        triggerEmbed({ nodeId, boardId, userId, data });
+        triggerEmbed({ nodeId, boardId, data });
       }
     },
     [boardId, userId],
@@ -201,7 +200,7 @@ export function useBoardActions(boardId: string) {
           selected: false,
         });
         if (userId) {
-          triggerEmbed({ nodeId, boardId, userId, data });
+          triggerEmbed({ nodeId, boardId, data });
         }
       } catch (err) {
         toast.error(

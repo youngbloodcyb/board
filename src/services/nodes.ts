@@ -119,7 +119,6 @@ export async function updateNode(input: {
   zIndex?: number;
 }): Promise<void> {
   const user = await requireUser();
-  await requireOwnedNode(input.nodeId, user.id);
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (input.position) {
     set.positionX = input.position.x;
@@ -131,7 +130,11 @@ export async function updateNode(input: {
     set.height = input.style.height;
   }
   if (input.zIndex !== undefined) set.zIndex = input.zIndex;
-  await db.update(nodes).set(set).where(eq(nodes.id, input.nodeId));
+  const result = await db
+    .update(nodes)
+    .set(set)
+    .where(and(eq(nodes.id, input.nodeId), eq(nodes.userId, user.id)));
+  if (result.rowCount === 0) throw new Error("Node not found");
 }
 
 export async function patchImageNode(input: {
@@ -152,10 +155,11 @@ export async function patchImageNode(input: {
     next.url = undefined;
   }
 
-  await db
+  const result = await db
     .update(nodes)
     .set({ data: next, updatedAt: new Date() })
-    .where(eq(nodes.id, input.nodeId));
+    .where(and(eq(nodes.id, input.nodeId), eq(nodes.userId, user.id)));
+  if (result.rowCount === 0) throw new Error("Node not found");
 
   if (oldKey) await deleteBlob(oldKey);
 }
@@ -164,7 +168,10 @@ export async function removeNode(nodeId: string): Promise<void> {
   const user = await requireUser();
   const node = await requireOwnedNode(nodeId, user.id);
   const key = nodeObjectKey(node.data as NodeData);
-  await db.delete(nodes).where(eq(nodes.id, nodeId));
+  const result = await db
+    .delete(nodes)
+    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, user.id)));
+  if (result.rowCount === 0) throw new Error("Node not found");
   if (key) await deleteBlob(key);
 }
 
