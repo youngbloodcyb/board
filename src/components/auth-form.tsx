@@ -1,14 +1,12 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
-
-import { authClient } from "@/lib/auth-client";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Field,
   FieldDescription,
@@ -16,6 +14,8 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { authClient } from "@/lib/auth-client";
 
 const signInSchema = z.object({
   email: z.email("Enter a valid email"),
@@ -38,6 +38,7 @@ function AuthFormInner({
   onToggle: () => void;
 }) {
   const isSignUp = mode === "signup";
+  const router = useRouter();
   const form = useForm<FormValues>({
     resolver: zodResolver(
       isSignUp ? signUpSchema : signInSchema,
@@ -57,13 +58,14 @@ function AuthFormInner({
           password: values.password,
         });
 
-    // On success the session refreshes reactively (authClient.useSession in
-    // the AuthGate) and the board swaps in — no manual redirect needed.
+    // On success redirect to the boards page.
     if (res.error) {
       toast.error(res.error.message ?? "Something went wrong");
       return;
     }
     toast.success(isSignUp ? "Account created" : "Welcome back");
+    router.push("/");
+    router.refresh();
   };
 
   return (

@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
-import { AuthGate } from "@/components/auth-gate";
+import { SignOutButton } from "@/components/sign-out-button";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  return <AuthGate>{children}</AuthGate>;
+  return (
+    <>
+      {children}
+      <SignOutButton />
+    </>
+  );
 }
