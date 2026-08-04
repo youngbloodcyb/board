@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome check",
-    "format": "biome format --write"
+    "format": "biome format --write",
+    "test": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@aws-sdk/rds-signer": "^3.1101.0",
@@ -65,16 +69,22 @@
     "@base-ui/react": "^1.5.0",
     "@biomejs/biome": "2.2.0",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/lodash.throttle": "^4.1.9",
     "@types/node": "^20",
     "@types/pg": "^8.20.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
     "drizzle-kit": "^1.0.0-rc.4",
+    "jsdom": "^30.0.1",
     "sass": "^1.100.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.5",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "kysely": "0.28.17"
