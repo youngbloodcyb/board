@@ -1,6 +1,6 @@
 // A pending node detected from paste/drop input, before it's persisted.
 // File-backed drafts carry the raw File so the action layer can upload its
-// bytes to Convex storage; URL-backed drafts are stored as-is.
+// bytes to object storage; URL-backed drafts are stored as-is.
 export type NodeDraft =
   | { kind: "link"; url: string }
   | { kind: "text"; text: string }

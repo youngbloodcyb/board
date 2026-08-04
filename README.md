@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Oat
 
-## Getting Started
+A canvas for ideas. Drop links, text, images, and PDFs onto an infinite board, arrange them freely, and search across everything semantically.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, Turbopack)
+- **Better Auth** (email/password, Drizzle adapter)
+- **Drizzle ORM** + **PostgreSQL** (pgvector for embeddings)
+- **Vercel Blob** (private object storage for images and PDFs)
+- **Vercel Workflows** (async embedding pipeline)
+- **React Flow** + **Zustand** (canvas + interaction cache)
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
+bun run db:generate   # generate Drizzle migration
+bun run db:migrate    # apply to Postgres
+bun run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+You'll need these environment variables:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection string |
+| `BETTER_AUTH_SECRET` | Auth session signing secret |
+| `SITE_URL` | App base URL |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob access token |
+| `OPENAI_API_KEY` | Embedding model (text-embedding-3-small) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command | Description |
+|---|---|
+| `bun run dev` | Start dev server |
+| `bun run build` | Production build |
+| `bun run test` | Run Vitest suite |
+| `bun run lint` | Biome check |
+| `bun run db:generate` | Generate Drizzle migration |
+| `bun run db:migrate` | Apply migrations to Postgres |
+| `bun run db:studio` | Open Drizzle Studio |

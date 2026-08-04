@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
-// Safety net for malformed ids (Convex rejects them at the query boundary).
+// Safety net for malformed ids.
 export default function BoardError() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4">
