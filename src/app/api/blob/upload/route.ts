@@ -3,8 +3,8 @@ import { requireUser } from "@/lib/auth-server";
 
 const MAX_SIZE = 10 * 1024 * 1024;
 
-export async function POST(req: Request) {
-  return handleUpload({
+export async function POST(req: Request): Promise<Response> {
+  const result = await handleUpload({
     request: req,
     body: await req.json(),
     onBeforeGenerateToken: async (pathname) => {
@@ -20,4 +20,5 @@ export async function POST(req: Request) {
       };
     },
   });
+  return Response.json(result);
 }
