@@ -7,7 +7,7 @@ import {
   ReactFlowProvider,
 } from "@xyflow/react";
 import Link from "next/link";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { DockMenu } from "@/components/dock-menu";
 import { ImageCropDialog } from "@/components/image-crop-dialog";
@@ -20,26 +20,46 @@ import type { Board as BoardRow } from "@/db/schema";
 import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardSync } from "@/hooks/use-board-sync";
 import { useCanvasInputs } from "@/hooks/use-canvas-inputs";
-import { type BoardNode, useBoardStore } from "@/lib/store";
+import { type CanvasNode, useBoardStore } from "@/lib/store";
 
 const proOptions = { hideAttribution: true };
 
 function BoardCanvas({ boardId }: { boardId: string }) {
   const ready = useBoardSync(boardId);
   const { moveNode, removeNode, resizeNode } = useBoardActions(boardId);
-  const { nodes, onNodesChange: applyChanges } = useBoardStore(
-    useShallow((s) => ({ nodes: s.nodes, onNodesChange: s.onNodesChange })),
+  const {
+    nodes,
+    pendingNodes,
+    onNodesChange: applyChanges,
+  } = useBoardStore(
+    useShallow((s) => ({
+      nodes: s.nodes,
+      pendingNodes: s.pendingNodes,
+      onNodesChange: s.onNodesChange,
+    })),
   );
   const { onDragOver, onDrop } = useCanvasInputs(boardId);
+  const canvasNodes = useMemo(
+    () => [...nodes, ...pendingNodes],
+    [nodes, pendingNodes],
+  );
 
   // Apply changes locally for smooth interaction, then persist the ones that
   // represent a committed edit: removals and finished resizes.
   const onNodesChange = useCallback(
-    (changes: NodeChange<BoardNode>[]) => {
+    (changes: NodeChange<CanvasNode>[]) => {
+      const pendingIds = new Set(
+        useBoardStore.getState().pendingNodes.map((node) => node.id),
+      );
+      for (const change of changes) {
+        if (change.type === "remove" && pendingIds.has(change.id)) {
+          useBoardStore.getState().removePendingNode(change.id);
+        }
+      }
       applyChanges(changes);
       for (const c of changes) {
         if (c.type === "remove") {
-          removeNode(c.id);
+          if (!pendingIds.has(c.id)) removeNode(c.id);
         } else if (c.type === "dimensions" && c.resizing === false) {
           // Resize finished — read the settled node and persist its size
           // (and position, since corner handles can shift it).
@@ -64,18 +84,16 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   if (!ready) return <Loading />;
 
   return (
-    <div
-      style={{ width: "100vw", height: "100vh" }}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
-      <ReactFlow
-        nodes={nodes}
+    <div style={{ width: "100vw", height: "100vh" }}>
+      <ReactFlow<CanvasNode>
+        nodes={canvasNodes}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
         onNodeDragStop={(_, __, dragged) => {
           dragged.forEach((n) => {
-            moveNode(n.id, n.position);
+            if (n.type !== "pending") moveNode(n.id, n.position);
           });
         }}
         fitView

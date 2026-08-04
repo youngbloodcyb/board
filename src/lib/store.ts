@@ -25,6 +25,26 @@ export type PdfNode = Node<PdfNodeData, "pdf">;
 
 export type BoardNode = LinkNode | TextNode | ImageNode | PdfNode;
 
+export type PendingNodePreview =
+  | { kind: "link"; url: string }
+  | { kind: "text"; text: string }
+  | { kind: "image"; src: string; alt: string }
+  | { kind: "pdf"; src: string; name: string };
+
+export type PendingNodeData = {
+  kind: "pending";
+  boardId: string;
+  preview: PendingNodePreview;
+  phase: "uploading" | "saving" | "failed";
+  progress?: number;
+  error?: string;
+  onRetry: () => void;
+  onRemove: () => void;
+};
+
+export type PendingNode = Node<PendingNodeData, "pending">;
+export type CanvasNode = BoardNode | PendingNode;
+
 // Default footprint per node kind, applied at creation time.
 export const DEFAULT_STYLE: Record<
   BoardNodeData["kind"],
@@ -43,6 +63,23 @@ const soleSelected = (nodes: BoardNode[]): BoardNode | null => {
   const selected = nodes.filter((n) => n.selected);
   return selected.length === 1 ? selected[0] : null;
 };
+
+const isPendingNode = (node: CanvasNode): node is PendingNode =>
+  node.type === "pending";
+
+const isBoardNode = (node: CanvasNode): node is BoardNode =>
+  node.type !== "pending";
+
+function revokePendingPreview(node: PendingNode) {
+  const preview = node.data.preview;
+  if (
+    (preview.kind === "image" || preview.kind === "pdf") &&
+    preview.src.startsWith("blob:") &&
+    typeof URL.revokeObjectURL === "function"
+  ) {
+    URL.revokeObjectURL(preview.src);
+  }
+}
 
 /** Server row -> React Flow node (id comes from the row's id). */
 export const toBoardNode = (doc: ClientNode): BoardNode =>
@@ -93,6 +130,9 @@ export const nodeSize = (
 
 type BoardState = {
   nodes: BoardNode[];
+  // Client-only nodes shown while an upload/server mutation is in flight.
+  // Keeping these separate prevents a server snapshot from dropping them.
+  pendingNodes: PendingNode[];
   // Which board `nodes` currently belongs to. Lets the canvas avoid rendering
   // a previous board's nodes while a new board's query is still loading.
   nodesBoardId: string | null;
@@ -109,13 +149,18 @@ type BoardState = {
   // preserving transient React Flow UI state (selection, in-flight drag,
   // measurements) only when staying on the same board.
   setNodes: (boardId: string, incoming: BoardNode[]) => void;
-  onNodesChange: (changes: NodeChange<BoardNode>[]) => void;
+  onNodesChange: (changes: NodeChange<CanvasNode>[]) => void;
+  addPendingNode: (node: PendingNode) => void;
+  updatePendingNode: (id: string, patch: Partial<PendingNodeData>) => void;
+  removePendingNode: (id: string) => void;
+  promotePendingNode: (id: string, node: BoardNode) => boolean;
   // Local, optimistic data merge (persisted separately via a mutation).
   updateNodeData: (id: string, patch: Partial<BoardNodeData>) => void;
 };
 
 export const useBoardStore = create<BoardState>((set, get) => ({
   nodes: [],
+  pendingNodes: [],
   nodesBoardId: null,
   selectedNode: null,
   editingTextNodeId: null,
@@ -143,14 +188,68 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         position: old.dragging ? old.position : n.position,
       } as BoardNode;
     });
-    set({ nodes, selectedNode: soleSelected(nodes), nodesBoardId: boardId });
+    const pendingNodes = get().pendingNodes.filter(
+      (pending) => pending.data.boardId === boardId,
+    );
+    for (const pending of get().pendingNodes) {
+      if (pending.data.boardId !== boardId) revokePendingPreview(pending);
+    }
+    set({
+      nodes,
+      pendingNodes,
+      selectedNode: soleSelected(nodes),
+      nodesBoardId: boardId,
+    });
   },
   onNodesChange: (changes) => {
-    const nodes = applyNodeChanges(changes, get().nodes);
+    const changed = applyNodeChanges(changes, [
+      ...get().nodes,
+      ...get().pendingNodes,
+    ]);
+    const nodes = changed.filter(isBoardNode);
+    const pendingNodes = changed.filter(isPendingNode);
     const selectedNode = soleSelected(nodes);
     set(
-      selectedNode === get().selectedNode ? { nodes } : { nodes, selectedNode },
+      selectedNode === get().selectedNode
+        ? { nodes, pendingNodes }
+        : { nodes, pendingNodes, selectedNode },
     );
+  },
+  addPendingNode: (node) =>
+    set({ pendingNodes: [...get().pendingNodes, node] }),
+  updatePendingNode: (id, patch) =>
+    set({
+      pendingNodes: get().pendingNodes.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, ...patch } } : node,
+      ),
+    }),
+  removePendingNode: (id) => {
+    const pending = get().pendingNodes.find((node) => node.id === id);
+    if (pending) revokePendingPreview(pending);
+    set({
+      pendingNodes: get().pendingNodes.filter((node) => node.id !== id),
+    });
+  },
+  promotePendingNode: (id, node) => {
+    const pending = get().pendingNodes.find((candidate) => candidate.id === id);
+    if (!pending) return false;
+    revokePendingPreview(pending);
+    const existingIndex = get().nodes.findIndex(
+      (candidate) => candidate.id === node.id,
+    );
+    const nodes =
+      existingIndex === -1
+        ? [...get().nodes, node]
+        : get().nodes.map((candidate, index) =>
+            index === existingIndex ? { ...candidate, ...node } : candidate,
+          );
+    set({
+      nodes,
+      pendingNodes: get().pendingNodes.filter(
+        (candidate) => candidate.id !== id,
+      ),
+    });
+    return true;
   },
   updateNodeData: (id, patch) => {
     set({

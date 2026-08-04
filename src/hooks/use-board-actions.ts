@@ -1,6 +1,6 @@
 import { upload as uploadBlob } from "@vercel/blob/client";
 import type { XYPosition } from "@xyflow/react";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { toast } from "sonner";
 import type { NodeData, NodeType } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
@@ -10,6 +10,8 @@ import {
   type BoardNode,
   DEFAULT_STYLE,
   nodeSize,
+  type PendingNode,
+  type PendingNodePreview,
   toClientNodeData,
   useBoardStore,
 } from "@/lib/store";
@@ -44,6 +46,41 @@ function addNodeLocal(node: BoardNode) {
   useBoardStore.setState((s) => ({ nodes: [...s.nodes, node] }));
 }
 
+function pendingPreview(draft: NodeDraft): PendingNodePreview {
+  switch (draft.kind) {
+    case "link":
+      return { kind: "link", url: draft.url };
+    case "text":
+      return { kind: "text", text: draft.text };
+    case "image":
+      return {
+        kind: "image",
+        src: URL.createObjectURL(draft.file),
+        alt: draft.alt,
+      };
+    case "pdf":
+      return "file" in draft
+        ? {
+            kind: "pdf",
+            src: URL.createObjectURL(draft.file),
+            name: draft.name,
+          }
+        : { kind: "pdf", src: draft.url, name: draft.name };
+  }
+}
+
+const isFileDraft = (
+  draft: NodeDraft,
+): draft is Extract<NodeDraft, { file: File }> => "file" in draft;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Couldn't add node";
+}
+
+function positionsMatch(a: XYPosition, b: XYPosition): boolean {
+  return a.x === b.x && a.y === b.y;
+}
+
 /**
  * Standalone data-only update, for nodes that edit their own payload (e.g. a
  * link node backfilling OG metadata) and don't have a board id in scope.
@@ -71,9 +108,13 @@ export function useUpdateNodeData() {
 export function useBoardActions(boardId: string) {
   const { data: session } = authClient.useSession();
   const userId = session?.user?.id;
+  const processingPendingIds = useRef(new Set<string>());
 
   const uploadFile = useCallback(
-    async (file: File): Promise<string> => {
+    async (
+      file: File,
+      onProgress?: (percentage: number) => void,
+    ): Promise<string> => {
       if (!userId) throw new Error("Not signed in");
       const pathname = objectKeyFor(userId, boardId);
       const { pathname: stored } = await uploadBlob(pathname, file, {
@@ -81,6 +122,7 @@ export function useBoardActions(boardId: string) {
         handleUploadUrl: "/api/blob/upload",
         clientPayload: boardId,
         contentType: file.type,
+        onUploadProgress: ({ percentage }) => onProgress?.(percentage),
       });
       return stored;
     },
@@ -89,7 +131,10 @@ export function useBoardActions(boardId: string) {
 
   // Turn a detected draft into the stored node data, uploading files first.
   const draftToData = useCallback(
-    async (draft: NodeDraft): Promise<NodeData> => {
+    async (
+      draft: NodeDraft,
+      onProgress?: (percentage: number) => void,
+    ): Promise<NodeData> => {
       switch (draft.kind) {
         case "link":
           return { kind: "link", url: draft.url };
@@ -98,14 +143,14 @@ export function useBoardActions(boardId: string) {
         case "image":
           return {
             kind: "image",
-            objectKey: await uploadFile(draft.file),
+            objectKey: await uploadFile(draft.file, onProgress),
             alt: draft.alt,
           };
         case "pdf":
           return "file" in draft
             ? {
                 kind: "pdf",
-                objectKey: await uploadFile(draft.file),
+                objectKey: await uploadFile(draft.file, onProgress),
                 name: draft.name,
               }
             : { kind: "pdf", url: draft.url, name: draft.name };
@@ -114,32 +159,113 @@ export function useBoardActions(boardId: string) {
     [uploadFile],
   );
 
-  const addDraft = useCallback(
-    async (draft: NodeDraft, position: XYPosition) => {
+  const processPendingDraft = useCallback(
+    async (pendingId: string, draft: NodeDraft) => {
+      if (processingPendingIds.current.has(pendingId)) return;
+      const initialPending = useBoardStore
+        .getState()
+        .pendingNodes.find((node) => node.id === pendingId);
+      if (!initialPending) return;
+
+      processingPendingIds.current.add(pendingId);
+      const fileBacked = isFileDraft(draft);
+      useBoardStore.getState().updatePendingNode(pendingId, {
+        phase: fileBacked ? "uploading" : "saving",
+        progress: fileBacked ? 0 : undefined,
+        error: undefined,
+      });
+
       try {
-        const data = await draftToData(draft);
+        const data = await draftToData(draft, (percentage) => {
+          useBoardStore.getState().updatePendingNode(pendingId, {
+            progress: percentage,
+          });
+        });
+        useBoardStore.getState().updatePendingNode(pendingId, {
+          phase: "saving",
+          progress: fileBacked ? 100 : undefined,
+        });
+
+        const beforeCreate =
+          useBoardStore
+            .getState()
+            .pendingNodes.find((node) => node.id === pendingId) ??
+          initialPending;
         const nodeId = await createNode({
           boardId,
           type: draft.kind as NodeType,
-          position,
+          position: beforeCreate.position,
           data,
           style: DEFAULT_STYLE[draft.kind],
         });
-        addNodeLocal({
-          id: nodeId,
-          type: draft.kind as NodeType,
-          position,
-          data: toClientNodeData(data, nodeId),
-          style: DEFAULT_STYLE[draft.kind],
-        } as BoardNode);
-        if (userId) {
-          triggerEmbed({ nodeId, boardId, data });
+
+        const latest = useBoardStore
+          .getState()
+          .pendingNodes.find((node) => node.id === pendingId);
+        const finalPosition = latest?.position ?? beforeCreate.position;
+        const promoted = useBoardStore
+          .getState()
+          .promotePendingNode(pendingId, {
+            id: nodeId,
+            type: draft.kind as NodeType,
+            position: finalPosition,
+            data: toClientNodeData(data, nodeId),
+            style: DEFAULT_STYLE[draft.kind],
+          } as BoardNode);
+
+        if (promoted && !positionsMatch(finalPosition, beforeCreate.position)) {
+          updateNode({ nodeId, position: finalPosition }).catch((error) =>
+            console.error("node move failed", error),
+          );
         }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Couldn't add node");
+        if (userId) triggerEmbed({ nodeId, boardId, data });
+      } catch (error) {
+        const pendingStillVisible = useBoardStore
+          .getState()
+          .pendingNodes.some((node) => node.id === pendingId);
+        if (pendingStillVisible) {
+          const message = errorMessage(error);
+          useBoardStore.getState().updatePendingNode(pendingId, {
+            phase: "failed",
+            error: message,
+          });
+          toast.error(message);
+        }
+      } finally {
+        processingPendingIds.current.delete(pendingId);
       }
     },
     [boardId, draftToData, userId],
+  );
+
+  const addDraft = useCallback(
+    (draft: NodeDraft, position: XYPosition) => {
+      const pendingId = `pending:${crypto.randomUUID()}`;
+      const node: PendingNode = {
+        id: pendingId,
+        type: "pending",
+        position,
+        data: {
+          kind: "pending",
+          boardId,
+          preview: pendingPreview(draft),
+          phase: isFileDraft(draft) ? "uploading" : "saving",
+          progress: isFileDraft(draft) ? 0 : undefined,
+          onRetry: () => {
+            void processPendingDraft(pendingId, draft);
+          },
+          onRemove: () => {
+            useBoardStore.getState().removePendingNode(pendingId);
+          },
+        },
+        style: DEFAULT_STYLE[draft.kind],
+        selectable: false,
+        deletable: false,
+      };
+      useBoardStore.getState().addPendingNode(node);
+      void processPendingDraft(pendingId, draft);
+    },
+    [boardId, processPendingDraft],
   );
 
   const moveNode = useCallback((nodeId: string, position: XYPosition) => {
