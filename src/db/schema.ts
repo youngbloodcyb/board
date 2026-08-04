@@ -45,6 +45,7 @@ export type PdfNodeData = {
   objectKey?: string;
   url?: string;
   name: string;
+  markdown?: string;
 };
 
 export type NodeData =

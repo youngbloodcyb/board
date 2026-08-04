@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   createNode: vi.fn(),
   updateNode: vi.fn(),
+  extractPdfMarkdown: vi.fn(),
   toastError: vi.fn(),
 }));
 
@@ -17,6 +18,9 @@ vi.mock("@/lib/auth-client", () => ({
 vi.mock("@/lib/blob", () => ({
   objectKeyFor: () => "user-a/board-a/upload",
 }));
+vi.mock("@/lib/pdf-parser", () => ({
+  extractPdfMarkdown: mocks.extractPdfMarkdown,
+}));
 vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
 vi.mock("@/services/nodes", () => ({
   createNode: mocks.createNode,
@@ -28,6 +32,7 @@ vi.mock("@/services/nodes", () => ({
 
 import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardStore } from "@/lib/store";
+import { MAX_UPLOAD_SIZE_BYTES } from "@/lib/upload-policy";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -53,6 +58,7 @@ beforeEach(() => {
     "fetch",
     vi.fn().mockResolvedValue(new Response(null, { status: 202 })),
   );
+  mocks.extractPdfMarkdown.mockResolvedValue(null);
 });
 
 describe("addDraft optimistic nodes", () => {
@@ -125,6 +131,35 @@ describe("addDraft optimistic nodes", () => {
     revokeObjectURL.mockRestore();
   });
 
+  it("rejects oversized files immediately without starting an upload", () => {
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:large-preview");
+    const { result } = renderHook(() => useBoardActions("board-a"));
+    const file = new File([], "large.png", { type: "image/png" });
+    Object.defineProperty(file, "size", {
+      value: MAX_UPLOAD_SIZE_BYTES + 1,
+    });
+
+    act(() => {
+      result.current.addDraft(
+        { kind: "image", file, alt: file.name },
+        { x: 0, y: 0 },
+      );
+    });
+
+    const pending = useBoardStore.getState().pendingNodes[0];
+    expect(pending?.data.phase).toBe("failed");
+    expect(pending?.data.error).toBe(
+      "large.png is too large. The maximum upload size is 10 MB.",
+    );
+    expect(pending?.data.onRetry).toBeUndefined();
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.extractPdfMarkdown).not.toHaveBeenCalled();
+    expect(mocks.createNode).not.toHaveBeenCalled();
+    createObjectURL.mockRestore();
+  });
+
   it("keeps failures visible and retries them in place", async () => {
     mocks.createNode.mockRejectedValueOnce(new Error("Database unavailable"));
     const { result } = renderHook(() => useBoardActions("board-a"));
@@ -144,12 +179,125 @@ describe("addDraft optimistic nodes", () => {
 
     mocks.createNode.mockResolvedValueOnce("link-real");
     act(() => {
-      useBoardStore.getState().pendingNodes[0]?.data.onRetry();
+      useBoardStore.getState().pendingNodes[0]?.data.onRetry?.();
     });
 
     await waitFor(() => {
       expect(useBoardStore.getState().pendingNodes).toEqual([]);
       expect(useBoardStore.getState().nodes[0]?.id).toBe("link-real");
     });
+  });
+
+  it("stores extracted markdown for an uploaded PDF", async () => {
+    mocks.upload.mockResolvedValue({ pathname: "user-a/board-a/report.pdf" });
+    mocks.extractPdfMarkdown.mockResolvedValue("# Quarterly report");
+    mocks.createNode.mockResolvedValue("pdf-real");
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:pdf-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const file = new File(["pdf"], "report.pdf", {
+      type: "application/pdf",
+    });
+    const { result } = renderHook(() => useBoardActions("board-a"));
+
+    act(() => {
+      result.current.addDraft(
+        { kind: "pdf", file, name: file.name },
+        { x: 0, y: 0 },
+      );
+    });
+
+    await waitFor(() => expect(mocks.createNode).toHaveBeenCalledOnce());
+    expect(mocks.extractPdfMarkdown).toHaveBeenCalledWith(file);
+    expect(mocks.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          kind: "pdf",
+          objectKey: "user-a/board-a/report.pdf",
+          name: "report.pdf",
+          markdown: "# Quarterly report",
+        },
+      }),
+    );
+    expect(useBoardStore.getState().nodes[0]?.data).toEqual({
+      kind: "pdf",
+      src: "/api/files/pdf-real",
+      name: "report.pdf",
+    });
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/embed",
+        expect.objectContaining({
+          body: JSON.stringify({ nodeId: "pdf-real" }),
+        }),
+      ),
+    );
+    vi.restoreAllMocks();
+  });
+
+  it("keeps an uploaded PDF when parsing fails", async () => {
+    mocks.upload.mockResolvedValue({ pathname: "user-a/board-a/report.pdf" });
+    mocks.extractPdfMarkdown.mockRejectedValue(new Error("Encrypted PDF"));
+    mocks.createNode.mockResolvedValue("pdf-real");
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:pdf-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const file = new File(["pdf"], "report.pdf", {
+      type: "application/pdf",
+    });
+    const { result } = renderHook(() => useBoardActions("board-a"));
+
+    act(() => {
+      result.current.addDraft(
+        { kind: "pdf", file, name: file.name },
+        { x: 0, y: 0 },
+      );
+    });
+
+    await waitFor(() => expect(mocks.createNode).toHaveBeenCalledOnce());
+    expect(mocks.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          kind: "pdf",
+          objectKey: "user-a/board-a/report.pdf",
+          name: "report.pdf",
+        },
+      }),
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "pdf parse failed",
+      expect.any(Error),
+    );
+    expect(mocks.toastError).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("does not parse URL-backed PDFs", async () => {
+    mocks.createNode.mockResolvedValue("pdf-url");
+    const { result } = renderHook(() => useBoardActions("board-a"));
+
+    act(() => {
+      result.current.addDraft(
+        {
+          kind: "pdf",
+          url: "https://example.com/report.pdf",
+          name: "report.pdf",
+        },
+        { x: 0, y: 0 },
+      );
+    });
+
+    await waitFor(() => expect(mocks.createNode).toHaveBeenCalledOnce());
+    expect(mocks.extractPdfMarkdown).not.toHaveBeenCalled();
+    expect(mocks.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          kind: "pdf",
+          url: "https://example.com/report.pdf",
+          name: "report.pdf",
+        },
+      }),
+    );
   });
 });

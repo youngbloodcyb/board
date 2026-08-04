@@ -78,52 +78,48 @@ beforeEach(() => {
 describe("POST /api/embed", () => {
   it("returns 401 when not authenticated", async () => {
     mockGetSession.mockResolvedValue(null as any);
-    const res = await POST(
-      jsonReq({
-        nodeId: "n1",
-        boardId: "b1",
-        data: { kind: "text", text: "hi" },
-      }),
-    );
+    const res = await POST(jsonReq({ nodeId: "n1" }));
     expect(res.status).toBe(401);
     expect(mockStart).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the node is not owned by the caller", async () => {
     db.select.mockReturnValue(chainable([]));
-    const res = await POST(
-      jsonReq({
-        nodeId: "n-other",
-        boardId: "b1",
-        data: { kind: "text", text: "hi" },
-      }),
-    );
+    const res = await POST(jsonReq({ nodeId: "n-other" }));
     expect(res.status).toBe(404);
     expect(mockStart).not.toHaveBeenCalled();
   });
 
   it("starts the embed workflow with the session user id when the node is owned", async () => {
-    db.select.mockReturnValue(chainable([{ id: "n1" }]));
     const data = { kind: "text", text: "hello" };
-    const res = await POST(jsonReq({ nodeId: "n1", boardId: "b1", data }));
+    db.select.mockReturnValue(chainable([{ id: "n1", boardId: "b1", data }]));
+    const res = await POST(jsonReq({ nodeId: "n1" }));
     expect(res.status).toBe(200);
     expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [
       { nodeId: "n1", boardId: "b1", userId: "user-a", data },
     ]);
   });
 
-  it("does not trust a userId from the request body", async () => {
-    db.select.mockReturnValue(chainable([{ id: "n1" }]));
+  it("uses authoritative node data instead of request body fields", async () => {
+    const data = { kind: "pdf", name: "report.pdf", markdown: "# Stored" };
+    db.select.mockReturnValue(
+      chainable([{ id: "n1", boardId: "board-owned", data }]),
+    );
     await POST(
       jsonReq({
         nodeId: "n1",
-        boardId: "b1",
+        boardId: "board-attacker",
         userId: "user-attacker",
-        data: { kind: "text", text: "x" },
+        data: { kind: "text", text: "Untrusted" },
       }),
     );
     expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [
-      expect.objectContaining({ userId: "user-a" }),
+      {
+        nodeId: "n1",
+        boardId: "board-owned",
+        userId: "user-a",
+        data,
+      },
     ]);
   });
 });

@@ -148,6 +148,7 @@ describe("listNodesByBoard", () => {
             kind: "pdf",
             objectKey: "user-a/board-a/doc.pdf",
             name: "doc",
+            markdown: "# Private document contents",
           },
         }),
       ]),
@@ -649,8 +650,7 @@ describe("duplicateNode", () => {
       position: { x: 24, y: 24 },
       style: { width: 200, height: 100 },
     });
-    expect(result.id).toBeTypeOf("string");
-    expect(result.data).toEqual({ kind: "text", text: "hello" });
+    expect(result).toBeTypeOf("string");
     expect(query.values).toHaveBeenCalledWith(
       expect.objectContaining({
         boardId: "board-a",
@@ -663,6 +663,27 @@ describe("duplicateNode", () => {
         zIndex: 3,
         data: { kind: "text", text: "hello" },
       }),
+    );
+  });
+
+  it("preserves private PDF markdown in the duplicated stored data", async () => {
+    const data = {
+      kind: "pdf" as const,
+      objectKey: "user-a/board-a/report.pdf",
+      name: "report.pdf",
+      markdown: "# Quarterly report",
+    };
+    setupLookups(storedNode({ id: "pdf-1", type: "pdf", data }), BOARD_A);
+    const query = setupInsert();
+
+    await duplicateNode({
+      nodeId: "pdf-1",
+      boardId: "board-a",
+      position: { x: 24, y: 24 },
+    });
+
+    expect(query.values).toHaveBeenCalledWith(
+      expect.objectContaining({ data }),
     );
   });
 

@@ -6,6 +6,7 @@ import type { NodeData, NodeType } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
 import { objectKeyFor } from "@/lib/blob";
 import type { NodeDraft } from "@/lib/board-utils";
+import { extractPdfMarkdown } from "@/lib/pdf-parser";
 import {
   type BoardNode,
   DEFAULT_STYLE,
@@ -15,6 +16,7 @@ import {
   toClientNodeData,
   useBoardStore,
 } from "@/lib/store";
+import { uploadSizeError } from "@/lib/upload-policy";
 import {
   createNode,
   duplicateNode as duplicateNodeAction,
@@ -23,15 +25,11 @@ import {
   updateNode,
 } from "@/services/nodes";
 
-function triggerEmbed(params: {
-  nodeId: string;
-  boardId: string;
-  data: NodeData;
-}) {
+function triggerEmbed(nodeId: string) {
   fetch("/api/embed", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify({ nodeId }),
   }).catch((err) => console.error("embed trigger failed", err));
 }
 
@@ -90,12 +88,11 @@ export function useUpdateNodeData() {
   const boardId = useBoardStore((s) => s.nodesBoardId);
   return useCallback(
     (nodeId: string, data: NodeData) => {
-      updateNode({ nodeId, data }).catch((e) =>
-        console.error("node update failed", e),
-      );
-      if (session?.user?.id && boardId) {
-        triggerEmbed({ nodeId, boardId, data });
-      }
+      updateNode({ nodeId, data })
+        .then(() => {
+          if (session?.user?.id && boardId) triggerEmbed(nodeId);
+        })
+        .catch((e) => console.error("node update failed", e));
     },
     [session?.user?.id, boardId],
   );
@@ -116,6 +113,8 @@ export function useBoardActions(boardId: string) {
       onProgress?: (percentage: number) => void,
     ): Promise<string> => {
       if (!userId) throw new Error("Not signed in");
+      const sizeError = uploadSizeError(file);
+      if (sizeError) throw new Error(sizeError);
       const pathname = objectKeyFor(userId, boardId);
       const { pathname: stored } = await uploadBlob(pathname, file, {
         access: "private",
@@ -146,14 +145,24 @@ export function useBoardActions(boardId: string) {
             objectKey: await uploadFile(draft.file, onProgress),
             alt: draft.alt,
           };
-        case "pdf":
-          return "file" in draft
-            ? {
-                kind: "pdf",
-                objectKey: await uploadFile(draft.file, onProgress),
-                name: draft.name,
-              }
-            : { kind: "pdf", url: draft.url, name: draft.name };
+        case "pdf": {
+          if (!("file" in draft)) {
+            return { kind: "pdf", url: draft.url, name: draft.name };
+          }
+          const [objectKey, markdown] = await Promise.all([
+            uploadFile(draft.file, onProgress),
+            extractPdfMarkdown(draft.file).catch((error) => {
+              console.error("pdf parse failed", error);
+              return null;
+            }),
+          ]);
+          return {
+            kind: "pdf",
+            objectKey,
+            name: draft.name,
+            ...(markdown ? { markdown } : {}),
+          };
+        }
       }
     },
     [uploadFile],
@@ -218,7 +227,7 @@ export function useBoardActions(boardId: string) {
             console.error("node move failed", error),
           );
         }
-        if (userId) triggerEmbed({ nodeId, boardId, data });
+        if (userId) triggerEmbed(nodeId);
       } catch (error) {
         const pendingStillVisible = useBoardStore
           .getState()
@@ -241,6 +250,9 @@ export function useBoardActions(boardId: string) {
   const addDraft = useCallback(
     (draft: NodeDraft, position: XYPosition) => {
       const pendingId = `pending:${crypto.randomUUID()}`;
+      const validationError = isFileDraft(draft)
+        ? uploadSizeError(draft.file)
+        : null;
       const node: PendingNode = {
         id: pendingId,
         type: "pending",
@@ -249,11 +261,18 @@ export function useBoardActions(boardId: string) {
           kind: "pending",
           boardId,
           preview: pendingPreview(draft),
-          phase: isFileDraft(draft) ? "uploading" : "saving",
+          phase: validationError
+            ? "failed"
+            : isFileDraft(draft)
+              ? "uploading"
+              : "saving",
           progress: isFileDraft(draft) ? 0 : undefined,
-          onRetry: () => {
-            void processPendingDraft(pendingId, draft);
-          },
+          error: validationError ?? undefined,
+          onRetry: validationError
+            ? undefined
+            : () => {
+                void processPendingDraft(pendingId, draft);
+              },
           onRemove: () => {
             useBoardStore.getState().removePendingNode(pendingId);
           },
@@ -263,7 +282,7 @@ export function useBoardActions(boardId: string) {
         deletable: false,
       };
       useBoardStore.getState().addPendingNode(node);
-      void processPendingDraft(pendingId, draft);
+      if (!validationError) void processPendingDraft(pendingId, draft);
     },
     [boardId, processPendingDraft],
   );
@@ -287,14 +306,13 @@ export function useBoardActions(boardId: string) {
 
   const setNodeData = useCallback(
     (nodeId: string, data: NodeData) => {
-      updateNode({ nodeId, data }).catch((e) =>
-        console.error("node update failed", e),
-      );
-      if (userId) {
-        triggerEmbed({ nodeId, boardId, data });
-      }
+      updateNode({ nodeId, data })
+        .then(() => {
+          if (userId) triggerEmbed(nodeId);
+        })
+        .catch((e) => console.error("node update failed", e));
     },
-    [boardId, userId],
+    [userId],
   );
 
   const resizeNode = useCallback(
@@ -313,7 +331,7 @@ export function useBoardActions(boardId: string) {
   const duplicateNode = useCallback(
     async (node: BoardNode) => {
       try {
-        const { id: nodeId, data } = await duplicateNodeAction({
+        const nodeId = await duplicateNodeAction({
           nodeId: node.id,
           boardId,
           position: { x: node.position.x + 24, y: node.position.y + 24 },
@@ -326,7 +344,7 @@ export function useBoardActions(boardId: string) {
           selected: false,
         });
         if (userId) {
-          triggerEmbed({ nodeId, boardId, data });
+          triggerEmbed(nodeId);
         }
       } catch (err) {
         toast.error(

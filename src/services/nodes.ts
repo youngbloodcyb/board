@@ -180,7 +180,7 @@ export async function duplicateNode(input: {
   boardId: string;
   position: { x: number; y: number };
   style?: { width: number; height: number };
-}): Promise<{ id: string; data: NodeData }> {
+}): Promise<string> {
   const user = await requireUser();
   const src = await requireOwnedNode(input.nodeId, user.id);
   await requireOwnedBoard(input.boardId, user.id);
@@ -197,5 +197,5 @@ export async function duplicateNode(input: {
     zIndex: src.zIndex ?? undefined,
     data: src.data,
   });
-  return { id, data: src.data as NodeData };
+  return id;
 }

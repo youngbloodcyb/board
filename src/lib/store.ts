@@ -38,7 +38,7 @@ export type PendingNodeData = {
   phase: "uploading" | "saving" | "failed";
   progress?: number;
   error?: string;
-  onRetry: () => void;
+  onRetry?: () => void;
   onRemove: () => void;
 };
 

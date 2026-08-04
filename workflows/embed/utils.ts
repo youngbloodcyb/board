@@ -15,5 +15,9 @@ export function embeddableText(data: NodeData): string | null {
       .trim();
     return text || null;
   }
+  if (data.kind === "pdf") {
+    const markdown = data.markdown?.trim();
+    return markdown || null;
+  }
   return null;
 }

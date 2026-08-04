@@ -84,10 +84,12 @@ export function PendingNode({ data }: NodeProps<PendingNodeType>) {
             </div>
           </div>
           <div className="nodrag flex gap-2">
-            <Button type="button" size="sm" onClick={data.onRetry}>
-              <ArrowClockwiseIcon />
-              Retry
-            </Button>
+            {data.onRetry && (
+              <Button type="button" size="sm" onClick={data.onRetry}>
+                <ArrowClockwiseIcon />
+                Retry
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
