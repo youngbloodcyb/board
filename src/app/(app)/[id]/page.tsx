@@ -1,4 +1,5 @@
-import { Board } from "@/components/board";
+import { Board, BoardNotFound } from "@/components/board";
+import { getBoard } from "@/services/boards";
 
 export default async function BoardPage({
   params,
@@ -6,5 +7,8 @@ export default async function BoardPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <Board boardId={id} />;
+  const board = await getBoard(id);
+
+  if (!board) return <BoardNotFound />;
+  return <Board board={board} />;
 }

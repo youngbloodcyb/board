@@ -1,39 +1,15 @@
-"use client";
-
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Loading } from "@/components/loading";
-import { Button } from "@/components/ui/button";
-import type { Board } from "@/db/schema";
-import { createBoard, listBoards } from "@/services/boards";
+import { NewBoardButton } from "@/components/new-board-button";
+import { listBoards } from "@/services/boards";
 
-export default function BoardsPage() {
-  const [boards, setBoards] = useState<Board[] | undefined>(undefined);
-  const router = useRouter();
-
-  useEffect(() => {
-    let cancelled = false;
-    listBoards().then((b) => {
-      if (!cancelled) setBoards(b);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const onCreate = async () => {
-    const id = await createBoard("Untitled board");
-    router.push(`/${id}`);
-  };
-
-  if (boards === undefined) return <Loading />;
+export default async function BoardsPage() {
+  const boards = await listBoards();
 
   return (
     <main className="mx-auto w-full max-w-5xl p-6">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Your boards</h1>
-        <Button onClick={onCreate}>New board</Button>
+        <NewBoardButton />
       </div>
 
       {boards.length === 0 ? (

@@ -7,7 +7,7 @@ import {
   ReactFlowProvider,
 } from "@xyflow/react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { DockMenu } from "@/components/dock-menu";
 import { ImageCropDialog } from "@/components/image-crop-dialog";
@@ -21,7 +21,6 @@ import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardSync } from "@/hooks/use-board-sync";
 import { useCanvasInputs } from "@/hooks/use-canvas-inputs";
 import { type BoardNode, useBoardStore } from "@/lib/store";
-import { getBoard } from "@/services/boards";
 
 const proOptions = { hideAttribution: true };
 
@@ -92,7 +91,7 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   );
 }
 
-function BoardNotFound() {
+export function BoardNotFound() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4">
       <p className="text-muted-foreground">This board doesn&rsquo;t exist.</p>
@@ -103,22 +102,7 @@ function BoardNotFound() {
   );
 }
 
-export function Board({ boardId }: { boardId: string }) {
-  // Verifies access too: getBoard returns null for missing/unowned boards.
-  const [board, setBoard] = useState<BoardRow | null | undefined>(undefined);
-
-  useEffect(() => {
-    let cancelled = false;
-    getBoard(boardId).then((b) => {
-      if (!cancelled) setBoard(b);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [boardId]);
-
-  if (board === undefined) return <Loading />;
-  if (board === null) return <BoardNotFound />;
+export function Board({ board }: { board: BoardRow }) {
   return (
     <ReactFlowProvider>
       <Button
@@ -129,7 +113,7 @@ export function Board({ boardId }: { boardId: string }) {
       >
         <Link href="/">← Boards</Link>
       </Button>
-      <BoardCanvas boardId={boardId} />
+      <BoardCanvas boardId={board.id} />
     </ReactFlowProvider>
   );
 }
