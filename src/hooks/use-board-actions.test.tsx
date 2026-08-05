@@ -54,10 +54,6 @@ beforeEach(() => {
     editingTextNodeId: null,
     croppingImageNodeId: null,
   });
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(new Response(null, { status: 202 })),
-  );
   mocks.extractPdfMarkdown.mockResolvedValue(null);
 });
 
@@ -223,14 +219,6 @@ describe("addDraft optimistic nodes", () => {
       src: "/api/files/pdf-real",
       name: "report.pdf",
     });
-    await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/embed",
-        expect.objectContaining({
-          body: JSON.stringify({ nodeId: "pdf-real" }),
-        }),
-      ),
-    );
     vi.restoreAllMocks();
   });
 

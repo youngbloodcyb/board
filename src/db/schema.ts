@@ -228,6 +228,7 @@ export const nodes = pgTable(
     height: doublePrecision("height"),
     zIndex: integer("z_index"),
     data: jsonb("data").notNull().$type<NodeData>(),
+    searchText: text("search_text").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -238,6 +239,10 @@ export const nodes = pgTable(
   (t) => [
     index("nodes_boardId_idx").on(t.boardId),
     index("nodes_userId_idx").on(t.userId),
+    index("nodes_searchText_gin_idx").using(
+      "gin",
+      sql`to_tsvector('simple', ${t.searchText})`,
+    ),
     check(
       "nodes_kind_matches_type",
       sql`(${t.data} ->> 'kind') = (${t.type})::text`,
@@ -257,6 +262,7 @@ export const embeddings = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    content: text("content"),
     embedding: vector("embedding", { dimensions: 1536 }).notNull(),
   },
   (t) => [

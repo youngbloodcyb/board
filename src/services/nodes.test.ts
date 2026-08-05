@@ -23,6 +23,16 @@ vi.mock("@/db", () => ({
   },
 }));
 
+vi.mock("workflow/api", () => ({
+  start: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@workflows/embed", () => ({
+  workflowEmbedNode: vi.fn(),
+}));
+
+import { workflowEmbedNode } from "@workflows/embed";
+import { start } from "workflow/api";
 import { db as _db } from "@/db";
 import type { NodeData, StoredNode } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
@@ -40,6 +50,8 @@ const db = _db as any;
 const mockRequireUser = vi.mocked(requireUser);
 const mockBlobExists = vi.mocked(blobExists);
 const mockDeleteBlob = vi.mocked(deleteBlob);
+const mockStart = vi.mocked(start);
+const mockWorkflowEmbedNode = vi.mocked(workflowEmbedNode);
 
 function chainable(value: unknown) {
   const p = Promise.resolve(value) as any;
@@ -238,8 +250,10 @@ describe("createNode", () => {
         width: 200,
         height: 100,
         data: { kind: "link", url: "https://x.com" },
+        searchText: "https://x.com",
       }),
     );
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [id]);
   });
 
   it("creates a text node", async () => {
@@ -359,7 +373,9 @@ describe("updateNode", () => {
     const setCall = (db.update as any).mock.results[0].value.set.mock
       .calls[0][0];
     expect(setCall.data).toEqual({ kind: "text", text: "new" });
+    expect(setCall.searchText).toBe("new");
     expect(setCall.positionX).toBeUndefined();
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, ["n1"]);
   });
 
   it("updates style (dimensions) only", async () => {
@@ -662,8 +678,10 @@ describe("duplicateNode", () => {
         height: 100,
         zIndex: 3,
         data: { kind: "text", text: "hello" },
+        searchText: "hello",
       }),
     );
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [result]);
   });
 
   it("preserves private PDF markdown in the duplicated stored data", async () => {

@@ -1,24 +1,24 @@
-import type { NodeData } from "@/db/schema";
-import { stepEmbedText, stepUpsertEmbedding } from "./steps";
-import { embeddableText } from "./utils";
+import {
+  stepDeleteEmbedding,
+  stepEmbedText,
+  stepGetNodeSearchText,
+  stepUpsertEmbedding,
+} from "./steps";
 
-export async function workflowEmbedNode(params: {
-  nodeId: string;
-  boardId: string;
-  userId: string;
-  data: NodeData;
-}) {
+export async function workflowEmbedNode(nodeId: string) {
   "use workflow";
 
-  const text = embeddableText(params.data);
-  if (!text) return;
+  const text = await stepGetNodeSearchText(nodeId);
+  if (!text) {
+    await stepDeleteEmbedding(nodeId);
+    return;
+  }
 
   const embedding = await stepEmbedText(text);
 
   await stepUpsertEmbedding({
-    nodeId: params.nodeId,
-    boardId: params.boardId,
-    userId: params.userId,
+    nodeId,
+    content: text,
     embedding,
   });
 }

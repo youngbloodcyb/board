@@ -28,7 +28,7 @@ You'll need these environment variables:
 | `BETTER_AUTH_SECRET` | Auth session signing secret |
 | `SITE_URL` | App base URL |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob access token |
-| `OPENAI_API_KEY` | Embedding model (text-embedding-3-small) |
+| `AI_GATEWAY_API_KEY` | Local AI Gateway authentication for Gemini Embedding 2 (deployments can use Vercel OIDC) |
 
 ## Scripts
 

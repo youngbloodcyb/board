@@ -1,6 +1,8 @@
 "use server";
 
+import { workflowEmbedNode } from "@workflows/embed";
 import { and, eq } from "drizzle-orm";
+import { start } from "workflow/api";
 import { db } from "@/db";
 import {
   type Board,
@@ -14,6 +16,15 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
 import { blobExists, deleteBlob, nodeObjectKey } from "@/lib/blob";
+import { nodeSearchText } from "@/lib/node-search";
+
+async function scheduleNodeEmbedding(nodeId: string): Promise<void> {
+  try {
+    await start(workflowEmbedNode, [nodeId]);
+  } catch (error) {
+    console.error("embedding workflow failed to start", { nodeId, error });
+  }
+}
 
 async function requireOwnedBoard(
   boardId: string,
@@ -97,6 +108,7 @@ export async function createNode(input: {
   }
 
   const id = crypto.randomUUID();
+  const searchText = nodeSearchText(input.data);
   await db.insert(nodes).values({
     id,
     boardId: input.boardId,
@@ -107,7 +119,9 @@ export async function createNode(input: {
     width: input.style?.width,
     height: input.style?.height,
     data: input.data,
+    searchText,
   });
+  if (searchText) await scheduleNodeEmbedding(id);
   return id;
 }
 
@@ -124,7 +138,10 @@ export async function updateNode(input: {
     set.positionX = input.position.x;
     set.positionY = input.position.y;
   }
-  if (input.data) set.data = input.data;
+  if (input.data) {
+    set.data = input.data;
+    set.searchText = nodeSearchText(input.data);
+  }
   if (input.style) {
     set.width = input.style.width;
     set.height = input.style.height;
@@ -135,6 +152,7 @@ export async function updateNode(input: {
     .set(set)
     .where(and(eq(nodes.id, input.nodeId), eq(nodes.userId, user.id)));
   if (result.rowCount === 0) throw new Error("Node not found");
+  if (input.data) await scheduleNodeEmbedding(input.nodeId);
 }
 
 export async function patchImageNode(input: {
@@ -185,6 +203,7 @@ export async function duplicateNode(input: {
   const src = await requireOwnedNode(input.nodeId, user.id);
   await requireOwnedBoard(input.boardId, user.id);
   const id = crypto.randomUUID();
+  const searchText = nodeSearchText(src.data);
   await db.insert(nodes).values({
     id,
     boardId: input.boardId,
@@ -196,6 +215,8 @@ export async function duplicateNode(input: {
     height: input.style?.height ?? src.height ?? undefined,
     zIndex: src.zIndex ?? undefined,
     data: src.data,
+    searchText,
   });
+  if (searchText) await scheduleNodeEmbedding(id);
   return id;
 }

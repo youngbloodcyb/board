@@ -90,21 +90,15 @@ describe("POST /api/embed", () => {
     expect(mockStart).not.toHaveBeenCalled();
   });
 
-  it("starts the embed workflow with the session user id when the node is owned", async () => {
-    const data = { kind: "text", text: "hello" };
-    db.select.mockReturnValue(chainable([{ id: "n1", boardId: "b1", data }]));
+  it("starts the embed workflow when the node is owned", async () => {
+    db.select.mockReturnValue(chainable([{ id: "n1" }]));
     const res = await POST(jsonReq({ nodeId: "n1" }));
     expect(res.status).toBe(200);
-    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [
-      { nodeId: "n1", boardId: "b1", userId: "user-a", data },
-    ]);
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, ["n1"]);
   });
 
-  it("uses authoritative node data instead of request body fields", async () => {
-    const data = { kind: "pdf", name: "report.pdf", markdown: "# Stored" };
-    db.select.mockReturnValue(
-      chainable([{ id: "n1", boardId: "board-owned", data }]),
-    );
+  it("ignores untrusted workflow parameters in the request body", async () => {
+    db.select.mockReturnValue(chainable([{ id: "n1" }]));
     await POST(
       jsonReq({
         nodeId: "n1",
@@ -113,13 +107,6 @@ describe("POST /api/embed", () => {
         data: { kind: "text", text: "Untrusted" },
       }),
     );
-    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [
-      {
-        nodeId: "n1",
-        boardId: "board-owned",
-        userId: "user-a",
-        data,
-      },
-    ]);
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, ["n1"]);
   });
 });

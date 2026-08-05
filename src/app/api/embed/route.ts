@@ -17,8 +17,6 @@ export async function POST(req: Request) {
   const rows = await db
     .select({
       id: nodes.id,
-      boardId: nodes.boardId,
-      data: nodes.data,
     })
     .from(nodes)
     .where(and(eq(nodes.id, nodeId), eq(nodes.userId, session.user.id)))
@@ -28,14 +26,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Node not found" }, { status: 404 });
   }
 
-  await start(workflowEmbedNode, [
-    {
-      nodeId: node.id,
-      boardId: node.boardId,
-      userId: session.user.id,
-      data: node.data,
-    },
-  ]);
+  await start(workflowEmbedNode, [node.id]);
 
   return NextResponse.json({ ok: true });
 }

@@ -1,0 +1,154 @@
+"use server";
+
+import { sql } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "@/db";
+import type { NodeData, NodeType } from "@/db/schema";
+import { requireUser } from "@/lib/auth-server";
+import { embedSearchText } from "@/lib/embedding";
+import { nodeSearchTitle } from "@/lib/node-search";
+
+const searchInputSchema = z.object({
+  query: z.string().trim().max(500),
+  boardId: z.string().min(1).max(100).optional(),
+  limit: z.number().int().min(1).max(50).default(20),
+});
+
+export type SearchNodesInput = z.input<typeof searchInputSchema>;
+
+export type NodeSearchResult = {
+  nodeId: string;
+  boardId: string;
+  boardName: string;
+  type: NodeType;
+  title: string;
+  excerpt: string;
+  position: { x: number; y: number };
+  score: number;
+  matchedBy: {
+    keyword: boolean;
+    semantic: boolean;
+  };
+};
+
+type SearchRow = {
+  nodeId: string;
+  boardId: string;
+  boardName: string;
+  type: NodeType;
+  data: NodeData;
+  excerpt: string;
+  positionX: number;
+  positionY: number;
+  score: number | string;
+  keywordMatch: boolean;
+  semanticMatch: boolean;
+};
+
+export async function searchNodes(
+  input: SearchNodesInput,
+): Promise<NodeSearchResult[]> {
+  const user = await requireUser();
+  const parsed = searchInputSchema.safeParse(input);
+  if (!parsed.success) throw new Error("Invalid search query");
+
+  const { query, boardId, limit } = parsed.data;
+  if (!query) return [];
+
+  const queryEmbedding = JSON.stringify(await embedSearchText(query));
+  const candidateLimit = Math.min(Math.max(limit * 5, 50), 200);
+  const semanticBoardFilter = boardId
+    ? sql`AND e.board_id = ${boardId}`
+    : sql``;
+  const keywordBoardFilter = boardId ? sql`AND n.board_id = ${boardId}` : sql``;
+  const finalBoardFilter = boardId ? sql`AND n.board_id = ${boardId}` : sql``;
+
+  const result = await db.execute<SearchRow>(sql`
+    WITH semantic_candidates AS (
+      SELECT
+        e.node_id,
+        e.embedding <=> ${queryEmbedding}::vector AS distance
+      FROM embeddings e
+      INNER JOIN nodes indexed_node
+        ON indexed_node.id = e.node_id
+        AND indexed_node.user_id = e.user_id
+        AND indexed_node.board_id = e.board_id
+        AND indexed_node.search_text = e.content
+      WHERE e.user_id = ${user.id}
+        ${semanticBoardFilter}
+      ORDER BY e.embedding <=> ${queryEmbedding}::vector
+      LIMIT ${candidateLimit}
+    ),
+    semantic AS (
+      SELECT
+        node_id,
+        row_number() OVER (ORDER BY distance) AS rank
+      FROM semantic_candidates
+    ),
+    keyword_candidates AS (
+      SELECT
+        n.id AS node_id,
+        ts_rank_cd(
+          to_tsvector('simple', n.search_text),
+          websearch_to_tsquery('simple', ${query})
+        ) AS relevance
+      FROM nodes n
+      WHERE n.user_id = ${user.id}
+        ${keywordBoardFilter}
+        AND to_tsvector('simple', n.search_text)
+          @@ websearch_to_tsquery('simple', ${query})
+      ORDER BY relevance DESC
+      LIMIT ${candidateLimit}
+    ),
+    keyword AS (
+      SELECT
+        node_id,
+        row_number() OVER (ORDER BY relevance DESC) AS rank
+      FROM keyword_candidates
+    ),
+    candidates AS (
+      SELECT node_id FROM semantic
+      UNION
+      SELECT node_id FROM keyword
+    )
+    SELECT
+      n.id AS "nodeId",
+      n.board_id AS "boardId",
+      b.name AS "boardName",
+      n.type,
+      n.data,
+      left(n.search_text, 280) AS excerpt,
+      n.position_x AS "positionX",
+      n.position_y AS "positionY",
+      (
+        COALESCE(1.0 / (60 + semantic.rank), 0) +
+        COALESCE(1.0 / (60 + keyword.rank), 0)
+      )::double precision AS score,
+      keyword.rank IS NOT NULL AS "keywordMatch",
+      semantic.rank IS NOT NULL AS "semanticMatch"
+    FROM candidates
+    INNER JOIN nodes n ON n.id = candidates.node_id
+    INNER JOIN boards b ON b.id = n.board_id
+    LEFT JOIN semantic ON semantic.node_id = n.id
+    LEFT JOIN keyword ON keyword.node_id = n.id
+    WHERE n.user_id = ${user.id}
+      ${finalBoardFilter}
+    ORDER BY score DESC, n.updated_at DESC
+    LIMIT ${limit}
+  `);
+
+  return result.rows.map((row) => ({
+    nodeId: row.nodeId,
+    boardId: row.boardId,
+    boardName: row.boardName,
+    type: row.type,
+    title: nodeSearchTitle(row.data, row.excerpt),
+    excerpt: row.excerpt,
+    position: { x: row.positionX, y: row.positionY },
+    score: Number(row.score),
+    matchedBy: {
+      keyword: row.keywordMatch,
+      semantic: row.semanticMatch,
+    },
+  }));
+}

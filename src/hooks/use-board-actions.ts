@@ -25,20 +25,6 @@ import {
   updateNode,
 } from "@/services/nodes";
 
-function triggerEmbed(nodeId: string) {
-  fetch("/api/embed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId }),
-  }).catch((err) => console.error("embed trigger failed", err));
-}
-
-function triggerEmbedDelete(nodeId: string) {
-  fetch(`/api/embed/${nodeId}`, { method: "DELETE" }).catch((err) =>
-    console.error("embed delete failed", err),
-  );
-}
-
 /** Add a freshly created node to the local store so it shows immediately. */
 function addNodeLocal(node: BoardNode) {
   useBoardStore.setState((s) => ({ nodes: [...s.nodes, node] }));
@@ -84,18 +70,11 @@ function positionsMatch(a: XYPosition, b: XYPosition): boolean {
  * link node backfilling OG metadata) and don't have a board id in scope.
  */
 export function useUpdateNodeData() {
-  const { data: session } = authClient.useSession();
-  const boardId = useBoardStore((s) => s.nodesBoardId);
-  return useCallback(
-    (nodeId: string, data: NodeData) => {
-      updateNode({ nodeId, data })
-        .then(() => {
-          if (session?.user?.id && boardId) triggerEmbed(nodeId);
-        })
-        .catch((e) => console.error("node update failed", e));
-    },
-    [session?.user?.id, boardId],
-  );
+  return useCallback((nodeId: string, data: NodeData) => {
+    updateNode({ nodeId, data }).catch((e) =>
+      console.error("node update failed", e),
+    );
+  }, []);
 }
 
 /**
@@ -227,7 +206,6 @@ export function useBoardActions(boardId: string) {
             console.error("node move failed", error),
           );
         }
-        if (userId) triggerEmbed(nodeId);
       } catch (error) {
         const pendingStillVisible = useBoardStore
           .getState()
@@ -244,7 +222,7 @@ export function useBoardActions(boardId: string) {
         processingPendingIds.current.delete(pendingId);
       }
     },
-    [boardId, draftToData, userId],
+    [boardId, draftToData],
   );
 
   const addDraft = useCallback(
@@ -301,19 +279,13 @@ export function useBoardActions(boardId: string) {
     removeNodeAction(nodeId).catch((e) =>
       console.error("node remove failed", e),
     );
-    triggerEmbedDelete(nodeId);
   }, []);
 
-  const setNodeData = useCallback(
-    (nodeId: string, data: NodeData) => {
-      updateNode({ nodeId, data })
-        .then(() => {
-          if (userId) triggerEmbed(nodeId);
-        })
-        .catch((e) => console.error("node update failed", e));
-    },
-    [userId],
-  );
+  const setNodeData = useCallback((nodeId: string, data: NodeData) => {
+    updateNode({ nodeId, data }).catch((e) =>
+      console.error("node update failed", e),
+    );
+  }, []);
 
   const resizeNode = useCallback(
     (
@@ -343,16 +315,13 @@ export function useBoardActions(boardId: string) {
           position: { x: node.position.x + 24, y: node.position.y + 24 },
           selected: false,
         });
-        if (userId) {
-          triggerEmbed(nodeId);
-        }
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "Couldn't duplicate node",
         );
       }
     },
-    [boardId, userId],
+    [boardId],
   );
 
   const bringToFront = useCallback((node: BoardNode) => {
