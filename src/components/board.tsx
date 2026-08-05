@@ -5,10 +5,13 @@ import {
   type NodeChange,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
 } from "@xyflow/react";
 import Link from "next/link";
-import { useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { BoardCommandMenu } from "@/components/board-command-menu";
 import { DockMenu } from "@/components/dock-menu";
 import { ImageCropDialog } from "@/components/image-crop-dialog";
 import { Loading } from "@/components/loading";
@@ -21,10 +24,20 @@ import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardSync } from "@/hooks/use-board-sync";
 import { useCanvasInputs } from "@/hooks/use-canvas-inputs";
 import { type CanvasNode, useBoardStore } from "@/lib/store";
+import type { NodeSearchResult } from "@/services/search";
 
 const proOptions = { hideAttribution: true };
 
-function BoardCanvas({ boardId }: { boardId: string }) {
+function BoardCanvas({
+  boardId,
+  focusNodeId,
+}: {
+  boardId: string;
+  focusNodeId?: string;
+}) {
+  const router = useRouter();
+  const { fitView } = useReactFlow<CanvasNode>();
+  const [commandOpen, setCommandOpen] = useState(false);
   const ready = useBoardSync(boardId);
   const { moveNode, removeNode, resizeNode } = useBoardActions(boardId);
   const {
@@ -42,6 +55,39 @@ function BoardCanvas({ boardId }: { boardId: string }) {
   const canvasNodes = useMemo(
     () => [...nodes, ...pendingNodes],
     [nodes, pendingNodes],
+  );
+
+  const focusNode = useCallback(
+    (nodeId: string) => {
+      if (!useBoardStore.getState().selectNode(nodeId)) return;
+      window.requestAnimationFrame(() => {
+        void fitView({
+          nodes: [{ id: nodeId }],
+          padding: 0.5,
+          maxZoom: 1.25,
+          duration: 350,
+        });
+      });
+    },
+    [fitView],
+  );
+
+  useEffect(() => {
+    if (ready && focusNodeId) focusNode(focusNodeId);
+  }, [focusNode, focusNodeId, ready]);
+
+  const onSelectSearchResult = useCallback(
+    (result: NodeSearchResult) => {
+      if (result.boardId === boardId) {
+        focusNode(result.nodeId);
+        return;
+      }
+
+      router.push(
+        `/${encodeURIComponent(result.boardId)}?node=${encodeURIComponent(result.nodeId)}`,
+      );
+    },
+    [boardId, focusNode, router],
   );
 
   // Apply changes locally for smooth interaction, then persist the ones that
@@ -104,7 +150,12 @@ function BoardCanvas({ boardId }: { boardId: string }) {
       <NodeDock boardId={boardId} />
       <TextEditorDrawer />
       <ImageCropDialog boardId={boardId} />
-      <DockMenu />
+      <BoardCommandMenu
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+        onSelectNode={onSelectSearchResult}
+      />
+      <DockMenu onSearch={() => setCommandOpen(true)} />
     </div>
   );
 }
@@ -120,7 +171,13 @@ export function BoardNotFound() {
   );
 }
 
-export function Board({ board }: { board: BoardRow }) {
+export function Board({
+  board,
+  focusNodeId,
+}: {
+  board: BoardRow;
+  focusNodeId?: string;
+}) {
   return (
     <ReactFlowProvider>
       <Button
@@ -131,7 +188,7 @@ export function Board({ board }: { board: BoardRow }) {
       >
         <Link href="/">← Boards</Link>
       </Button>
-      <BoardCanvas boardId={board.id} />
+      <BoardCanvas boardId={board.id} focusNodeId={focusNodeId} />
     </ReactFlowProvider>
   );
 }

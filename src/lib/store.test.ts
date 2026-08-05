@@ -99,12 +99,10 @@ describe("pending board nodes", () => {
     useBoardStore.getState().addPendingNode(pendingNode());
     useBoardStore.getState().setNodes("board-a", [persistedNode("node-real")]);
 
-    useBoardStore
-      .getState()
-      .promotePendingNode("pending:1", {
-        ...persistedNode("node-real"),
-        position: { x: 50, y: 60 },
-      });
+    useBoardStore.getState().promotePendingNode("pending:1", {
+      ...persistedNode("node-real"),
+      position: { x: 50, y: 60 },
+    });
 
     expect(useBoardStore.getState().nodes).toHaveLength(1);
     expect(useBoardStore.getState().nodes[0]?.position).toEqual({
@@ -131,5 +129,43 @@ describe("pending board nodes", () => {
     expect(useBoardStore.getState().pendingNodes).toEqual([]);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:pdf-preview");
     revokeObjectURL.mockRestore();
+  });
+});
+
+describe("node selection", () => {
+  it("selects exactly one loaded node", () => {
+    useBoardStore
+      .getState()
+      .setNodes("board-a", [
+        { ...persistedNode("node-1"), selected: true },
+        persistedNode("node-2"),
+      ]);
+    useBoardStore.getState().addPendingNode({
+      ...pendingNode(),
+      selected: true,
+    });
+
+    const selected = useBoardStore.getState().selectNode("node-2");
+
+    expect(selected).toBe(true);
+    expect(
+      useBoardStore
+        .getState()
+        .nodes.filter((node) => node.selected)
+        .map((node) => node.id),
+    ).toEqual(["node-2"]);
+    expect(useBoardStore.getState().pendingNodes[0]?.selected).toBe(false);
+    expect(useBoardStore.getState().selectedNode?.id).toBe("node-2");
+  });
+
+  it("leaves selection unchanged when the node is not loaded", () => {
+    useBoardStore
+      .getState()
+      .setNodes("board-a", [{ ...persistedNode("node-1"), selected: true }]);
+
+    const selected = useBoardStore.getState().selectNode("missing");
+
+    expect(selected).toBe(false);
+    expect(useBoardStore.getState().selectedNode?.id).toBe("node-1");
   });
 });

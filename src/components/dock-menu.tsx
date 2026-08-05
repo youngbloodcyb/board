@@ -2,10 +2,10 @@
 
 import type { Icon } from "@phosphor-icons/react";
 import {
-  FadersIcon,
-  PersonIcon,
-  GearIcon,
   BinocularsIcon,
+  FadersIcon,
+  GearIcon,
+  PersonIcon,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,10 +17,6 @@ interface DockMenuOption {
 }
 
 const options: DockMenuOption[] = [
-  {
-    name: "search",
-    icon: BinocularsIcon,
-  },
   {
     name: "share",
     icon: PersonIcon,
@@ -35,7 +31,22 @@ const options: DockMenuOption[] = [
   },
 ];
 
-export function DockMenu({ className }: { className?: string }) {
+export function DockMenu({
+  className,
+  onSearch,
+}: {
+  className?: string;
+  onSearch?: () => void;
+}) {
+  const menuOptions: DockMenuOption[] = [
+    {
+      name: "search",
+      icon: BinocularsIcon,
+      onSelect: onSearch,
+    },
+    ...options,
+  ];
+
   return (
     <div
       className={cn(
@@ -44,7 +55,7 @@ export function DockMenu({ className }: { className?: string }) {
         className,
       )}
     >
-      {options.map(({ name, icon: IconCmp, onSelect }) => (
+      {menuOptions.map(({ name, icon: IconCmp, onSelect }) => (
         <Button
           key={name}
           type="button"

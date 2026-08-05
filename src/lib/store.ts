@@ -150,6 +150,8 @@ type BoardState = {
   // measurements) only when staying on the same board.
   setNodes: (boardId: string, incoming: BoardNode[]) => void;
   onNodesChange: (changes: NodeChange<CanvasNode>[]) => void;
+  // Select exactly one persisted node. Returns false when it is not loaded.
+  selectNode: (id: string) => boolean;
   addPendingNode: (node: PendingNode) => void;
   updatePendingNode: (id: string, patch: Partial<PendingNodeData>) => void;
   removePendingNode: (id: string) => void;
@@ -214,6 +216,25 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         ? { nodes, pendingNodes }
         : { nodes, pendingNodes, selectedNode },
     );
+  },
+  selectNode: (id) => {
+    const selectedNode = get().nodes.find((node) => node.id === id);
+    if (!selectedNode) return false;
+
+    const nodes = get().nodes.map((node) => ({
+      ...node,
+      selected: node.id === id,
+    })) as BoardNode[];
+    const pendingNodes = get().pendingNodes.map((node) => ({
+      ...node,
+      selected: false,
+    })) as PendingNode[];
+    set({
+      nodes,
+      pendingNodes,
+      selectedNode: nodes.find((node) => node.id === id) ?? null,
+    });
+    return true;
   },
   addPendingNode: (node) =>
     set({ pendingNodes: [...get().pendingNodes, node] }),
