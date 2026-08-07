@@ -8,12 +8,18 @@ vi.mock("@vercel/blob/client", () => ({
   handleUpload: vi.fn(),
 }));
 
+vi.mock("@/services/board-access", () => ({
+  requireBoardAccess: vi.fn(),
+}));
+
 import { handleUpload } from "@vercel/blob/client";
 import { requireUser } from "@/lib/auth-server";
+import { requireBoardAccess } from "@/services/board-access";
 import { POST } from "./route";
 
 const mockRequireUser = vi.mocked(requireUser);
 const mockHandleUpload = vi.mocked(handleUpload) as any;
+const mockRequireBoardAccess = vi.mocked(requireBoardAccess);
 
 const USER_A = {
   id: "user-a",
@@ -40,9 +46,12 @@ beforeEach(() => {
     async ({
       onBeforeGenerateToken,
     }: {
-      onBeforeGenerateToken: (pathname: string) => Promise<unknown>;
+      onBeforeGenerateToken: (
+        pathname: string,
+        clientPayload: string,
+      ) => Promise<unknown>;
     }) => {
-      await onBeforeGenerateToken("user-a/board-a/file.png");
+      await onBeforeGenerateToken("user-a/board-a/file.png", "board-a");
       return { ok: true } as any;
     },
   );
@@ -61,19 +70,27 @@ describe("POST /api/blob/upload", () => {
       async ({
         onBeforeGenerateToken,
       }: {
-        onBeforeGenerateToken: (pathname: string) => Promise<unknown>;
+        onBeforeGenerateToken: (
+          pathname: string,
+          clientPayload: string,
+        ) => Promise<unknown>;
       }) => {
-        await onBeforeGenerateToken("user-b/board-a/file.png");
+        await onBeforeGenerateToken("user-b/board-a/file.png", "board-a");
         return { ok: true } as any;
       },
     );
     await expect(
       POST(makeReq({ pathname: "user-b/board-a/file.png" })),
-    ).rejects.toThrow("Object key must be scoped to the authenticated user");
+    ).rejects.toThrow("Object key must be scoped to the selected board");
   });
 
   it("allows when the object key is scoped to the authenticated user", async () => {
     const res = await POST(makeReq({ pathname: "user-a/board-a/file.png" }));
     expect(res.status).toBe(200);
+    expect(mockRequireBoardAccess).toHaveBeenCalledWith(
+      "board-a",
+      USER_A.id,
+      "edit",
+    );
   });
 });

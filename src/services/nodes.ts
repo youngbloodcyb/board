@@ -1,12 +1,10 @@
 "use server";
 
 import { workflowEmbedNode } from "@workflows/embed";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { start } from "workflow/api";
 import { db } from "@/db";
 import {
-  type Board,
-  boards,
   type ClientNode,
   type ClientNodeData,
   type NodeData,
@@ -18,6 +16,7 @@ import { requireUser } from "@/lib/auth-server";
 import { blobExists, deleteBlob, nodeObjectKey } from "@/lib/blob";
 import { nodeEmbeddingSourceKey } from "@/lib/embedding-source";
 import { nodeSearchText } from "@/lib/node-search";
+import { requireBoardAccess, requireNodeAccess } from "@/services/board-access";
 
 async function scheduleNodeEmbedding(nodeId: string): Promise<void> {
   try {
@@ -25,29 +24,6 @@ async function scheduleNodeEmbedding(nodeId: string): Promise<void> {
   } catch (error) {
     console.error("embedding workflow failed to start", { nodeId, error });
   }
-}
-
-async function requireOwnedBoard(
-  boardId: string,
-  userId: string,
-): Promise<Board> {
-  const rows = await db
-    .select()
-    .from(boards)
-    .where(and(eq(boards.id, boardId), eq(boards.userId, userId)))
-    .limit(1);
-  if (!rows[0]) throw new Error("Board not found");
-  return rows[0];
-}
-
-async function requireOwnedNode(nodeId: string, userId: string) {
-  const rows = await db
-    .select()
-    .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId)))
-    .limit(1);
-  if (!rows[0]) throw new Error("Node not found");
-  return rows[0];
 }
 
 function toClientData(data: NodeData, nodeId: string): ClientNodeData {
@@ -85,10 +61,8 @@ function toClientNode(row: StoredNode): ClientNode {
 
 export async function listNodesByBoard(boardId: string): Promise<ClientNode[]> {
   const user = await requireUser();
-  const rows = await db
-    .select()
-    .from(nodes)
-    .where(and(eq(nodes.boardId, boardId), eq(nodes.userId, user.id)));
+  await requireBoardAccess(boardId, user.id, "view");
+  const rows = await db.select().from(nodes).where(eq(nodes.boardId, boardId));
   return rows.map(toClientNode);
 }
 
@@ -100,10 +74,13 @@ export async function createNode(input: {
   style?: { width: number; height: number };
 }): Promise<string> {
   const user = await requireUser();
-  await requireOwnedBoard(input.boardId, user.id);
+  const { board } = await requireBoardAccess(input.boardId, user.id, "edit");
 
   const key = nodeObjectKey(input.data);
   if (key) {
+    if (!key.startsWith(`${user.id}/${input.boardId}/`)) {
+      throw new Error("Upload does not belong to this board");
+    }
     const exists = await blobExists(key);
     if (!exists) throw new Error("Upload not found");
   }
@@ -114,7 +91,7 @@ export async function createNode(input: {
   await db.insert(nodes).values({
     id,
     boardId: input.boardId,
-    userId: user.id,
+    userId: board.userId,
     type: input.type,
     positionX: input.position.x,
     positionY: input.position.y,
@@ -136,6 +113,7 @@ export async function updateNode(input: {
   zIndex?: number;
 }): Promise<void> {
   const user = await requireUser();
+  await requireNodeAccess(input.nodeId, user.id, "edit");
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (input.position) {
     set.positionX = input.position.x;
@@ -155,7 +133,7 @@ export async function updateNode(input: {
   const result = await db
     .update(nodes)
     .set(set)
-    .where(and(eq(nodes.id, input.nodeId), eq(nodes.userId, user.id)));
+    .where(eq(nodes.id, input.nodeId));
   if (result.rowCount === 0) throw new Error("Node not found");
   if (input.data) await scheduleNodeEmbedding(input.nodeId);
 }
@@ -166,13 +144,19 @@ export async function patchImageNode(input: {
   objectKey?: string;
 }): Promise<void> {
   const user = await requireUser();
-  const node = await requireOwnedNode(input.nodeId, user.id);
+  const { node } = await requireNodeAccess(input.nodeId, user.id, "edit");
   if (node.data.kind !== "image") return;
 
   const next = { ...node.data };
   let oldKey: string | undefined;
   if (input.fit !== undefined) next.fit = input.fit;
   if (input.objectKey !== undefined) {
+    if (!input.objectKey.startsWith(`${user.id}/${node.boardId}/`)) {
+      throw new Error("Upload does not belong to this board");
+    }
+    if (!(await blobExists(input.objectKey))) {
+      throw new Error("Upload not found");
+    }
     if (next.objectKey) oldKey = next.objectKey;
     next.objectKey = input.objectKey;
     next.url = undefined;
@@ -189,7 +173,7 @@ export async function patchImageNode(input: {
       embeddingSource,
       updatedAt: new Date(),
     })
-    .where(and(eq(nodes.id, input.nodeId), eq(nodes.userId, user.id)));
+    .where(eq(nodes.id, input.nodeId));
   if (result.rowCount === 0) throw new Error("Node not found");
 
   if (input.objectKey !== undefined) await scheduleNodeEmbedding(input.nodeId);
@@ -198,11 +182,9 @@ export async function patchImageNode(input: {
 
 export async function removeNode(nodeId: string): Promise<void> {
   const user = await requireUser();
-  const node = await requireOwnedNode(nodeId, user.id);
+  const { node } = await requireNodeAccess(nodeId, user.id, "edit");
   const key = nodeObjectKey(node.data as NodeData);
-  const result = await db
-    .delete(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, user.id)));
+  const result = await db.delete(nodes).where(eq(nodes.id, nodeId));
   if (result.rowCount === 0) throw new Error("Node not found");
   if (key) await deleteBlob(key);
 }
@@ -214,15 +196,15 @@ export async function duplicateNode(input: {
   style?: { width: number; height: number };
 }): Promise<string> {
   const user = await requireUser();
-  const src = await requireOwnedNode(input.nodeId, user.id);
-  await requireOwnedBoard(input.boardId, user.id);
+  const { node: src } = await requireNodeAccess(input.nodeId, user.id, "edit");
+  const { board } = await requireBoardAccess(input.boardId, user.id, "edit");
   const id = crypto.randomUUID();
   const searchText = nodeSearchText(src.data);
   const embeddingSource = nodeEmbeddingSourceKey(src.data, searchText);
   await db.insert(nodes).values({
     id,
     boardId: input.boardId,
-    userId: user.id,
+    userId: board.userId,
     type: src.type,
     positionX: input.position.x,
     positionY: input.position.y,

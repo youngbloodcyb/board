@@ -12,18 +12,20 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { BoardCommandMenu } from "@/components/board-command-menu";
+import { BoardPermissionsProvider } from "@/components/board-permissions";
 import { DockMenu } from "@/components/dock-menu";
 import { ImageCropDialog } from "@/components/image-crop-dialog";
 import { Loading } from "@/components/loading";
 import { NodeDock } from "@/components/node-dock";
 import { nodeTypes } from "@/components/nodes";
+import { SharingDialog } from "@/components/sharing-dialog";
 import { TextEditorDrawer } from "@/components/text-editor-drawer";
 import { Button } from "@/components/ui/button";
-import type { Board as BoardRow } from "@/db/schema";
 import { useBoardActions } from "@/hooks/use-board-actions";
 import { useBoardSync } from "@/hooks/use-board-sync";
 import { useCanvasInputs } from "@/hooks/use-canvas-inputs";
 import { type CanvasNode, useBoardStore } from "@/lib/store";
+import type { AccessibleBoard } from "@/services/boards";
 import type { NodeSearchResult } from "@/services/search";
 
 const proOptions = { hideAttribution: true };
@@ -31,9 +33,11 @@ const proOptions = { hideAttribution: true };
 function BoardCanvas({
   boardId,
   focusNodeId,
+  canEdit,
 }: {
   boardId: string;
   focusNodeId?: string;
+  canEdit: boolean;
 }) {
   const router = useRouter();
   const { fitView } = useReactFlow<CanvasNode>();
@@ -51,7 +55,7 @@ function BoardCanvas({
       onNodesChange: s.onNodesChange,
     })),
   );
-  const { onDragOver, onDrop } = useCanvasInputs(boardId);
+  const { onDragOver, onDrop } = useCanvasInputs(boardId, canEdit);
   const canvasNodes = useMemo(
     () => [...nodes, ...pendingNodes],
     [nodes, pendingNodes],
@@ -135,9 +139,12 @@ function BoardCanvas({
         nodes={canvasNodes}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
+        onDragOver={canEdit ? onDragOver : undefined}
+        onDrop={canEdit ? onDrop : undefined}
+        nodesDraggable={canEdit}
+        deleteKeyCode={canEdit ? ["Backspace", "Delete"] : null}
         onNodeDragStop={(_, __, dragged) => {
+          if (!canEdit) return;
           dragged.forEach((n) => {
             if (n.type !== "pending") moveNode(n.id, n.position);
           });
@@ -147,9 +154,9 @@ function BoardCanvas({
       >
         <Background gap={20} size={1} />
       </ReactFlow>
-      <NodeDock boardId={boardId} />
-      <TextEditorDrawer />
-      <ImageCropDialog boardId={boardId} />
+      {canEdit && <NodeDock boardId={boardId} />}
+      {canEdit && <TextEditorDrawer />}
+      {canEdit && <ImageCropDialog boardId={boardId} />}
       <BoardCommandMenu
         open={commandOpen}
         onOpenChange={setCommandOpen}
@@ -175,20 +182,38 @@ export function Board({
   board,
   focusNodeId,
 }: {
-  board: BoardRow;
+  board: AccessibleBoard;
   focusNodeId?: string;
 }) {
+  const canEdit = board.accessRole !== "viewer";
   return (
     <ReactFlowProvider>
-      <Button
-        asChild
-        variant="outline"
-        size="sm"
-        className="fixed top-4 left-4 z-50"
-      >
-        <Link href="/">← Boards</Link>
-      </Button>
-      <BoardCanvas boardId={board.id} focusNodeId={focusNodeId} />
+      <BoardPermissionsProvider canEdit={canEdit}>
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="fixed top-4 left-4 z-50"
+        >
+          <Link href="/">← Boards</Link>
+        </Button>
+        {board.accessRole === "owner" ? (
+          <SharingDialog
+            boardId={board.id}
+            boardName={board.name}
+            className="fixed top-4 right-24 z-50"
+          />
+        ) : (
+          <div className="fixed top-4 right-24 z-50 rounded-md border bg-card px-2 py-1 text-xs font-medium capitalize shadow-sm">
+            {board.accessRole === "viewer" ? "View only" : "Can edit"}
+          </div>
+        )}
+        <BoardCanvas
+          boardId={board.id}
+          focusNodeId={focusNodeId}
+          canEdit={canEdit}
+        />
+      </BoardPermissionsProvider>
     </ReactFlowProvider>
   );
 }

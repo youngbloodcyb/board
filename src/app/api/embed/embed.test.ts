@@ -4,13 +4,6 @@ vi.mock("@/lib/auth-server", () => ({
   getSession: vi.fn(),
 }));
 
-vi.mock("@/db", () => ({
-  db: {
-    select: vi.fn(),
-    delete: vi.fn(),
-  },
-}));
-
 vi.mock("workflow/api", () => ({
   start: vi.fn().mockResolvedValue(undefined),
 }));
@@ -19,24 +12,20 @@ vi.mock("@workflows/embed", () => ({
   workflowEmbedNode: vi.fn(),
 }));
 
+vi.mock("@/services/board-access", () => ({
+  requireNodeAccess: vi.fn(),
+}));
+
 import { workflowEmbedNode } from "@workflows/embed";
 import { start } from "workflow/api";
-import { db as _db } from "@/db";
 import { getSession } from "@/lib/auth-server";
+import { requireNodeAccess } from "@/services/board-access";
 import { POST } from "./route";
 
-const db = _db as any;
 const mockGetSession = vi.mocked(getSession);
 const mockStart = vi.mocked(start);
 const mockWorkflowEmbedNode = vi.mocked(workflowEmbedNode);
-
-function chainable(value: unknown) {
-  const p = Promise.resolve(value) as any;
-  p.from = vi.fn().mockReturnThis();
-  p.where = vi.fn().mockReturnThis();
-  p.limit = vi.fn().mockReturnThis();
-  return p;
-}
+const mockRequireNodeAccess = vi.mocked(requireNodeAccess);
 
 const SESSION_A = {
   user: {
@@ -70,8 +59,6 @@ function jsonReq(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  db.select.mockReset();
-  db.delete.mockReset();
   mockGetSession.mockResolvedValue(SESSION_A as any);
 });
 
@@ -84,21 +71,27 @@ describe("POST /api/embed", () => {
   });
 
   it("returns 404 when the node is not owned by the caller", async () => {
-    db.select.mockReturnValue(chainable([]));
+    mockRequireNodeAccess.mockRejectedValue(new Error("Forbidden"));
     const res = await POST(jsonReq({ nodeId: "n-other" }));
     expect(res.status).toBe(404);
     expect(mockStart).not.toHaveBeenCalled();
   });
 
   it("starts the embed workflow when the node is owned", async () => {
-    db.select.mockReturnValue(chainable([{ id: "n1" }]));
+    mockRequireNodeAccess.mockResolvedValue({
+      node: { id: "n1" },
+      access: {},
+    } as any);
     const res = await POST(jsonReq({ nodeId: "n1" }));
     expect(res.status).toBe(200);
     expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, ["n1"]);
   });
 
   it("ignores untrusted workflow parameters in the request body", async () => {
-    db.select.mockReturnValue(chainable([{ id: "n1" }]));
+    mockRequireNodeAccess.mockResolvedValue({
+      node: { id: "n1" },
+      access: {},
+    } as any);
     await POST(
       jsonReq({
         nodeId: "n1",

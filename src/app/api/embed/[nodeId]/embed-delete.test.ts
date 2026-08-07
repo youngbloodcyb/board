@@ -10,12 +10,18 @@ vi.mock("@/db", () => ({
   },
 }));
 
+vi.mock("@/services/board-access", () => ({
+  requireNodeAccess: vi.fn(),
+}));
+
 import { db as _db } from "@/db";
 import { getSession } from "@/lib/auth-server";
+import { requireNodeAccess } from "@/services/board-access";
 import { DELETE } from "./route";
 
 const db = _db as any;
 const mockGetSession = vi.mocked(getSession);
+const mockRequireNodeAccess = vi.mocked(requireNodeAccess);
 
 function chainable(value: unknown) {
   const p = Promise.resolve(value) as any;
@@ -49,6 +55,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.delete.mockReset();
   mockGetSession.mockResolvedValue(SESSION_A as any);
+  mockRequireNodeAccess.mockResolvedValue({
+    node: { id: "n1" },
+    access: {},
+  } as any);
 });
 
 function makeReq(nodeId: string) {
@@ -67,12 +77,13 @@ describe("DELETE /api/embed/[nodeId]", () => {
     expect(db.delete).not.toHaveBeenCalled();
   });
 
-  it("scopes the delete by both nodeId and the session user id", async () => {
+  it("requires edit access before deleting by node id", async () => {
     db.delete.mockReturnValue(chainable(undefined));
     const [req, ctx] = makeReq("n1");
     const res = await DELETE(req, ctx);
     expect(res.status).toBe(200);
     expect(db.delete).toHaveBeenCalled();
+    expect(mockRequireNodeAccess).toHaveBeenCalledWith("n1", "user-a", "edit");
     const whereChain = db.delete.mock.results[0].value;
     expect(whereChain.where).toHaveBeenCalled();
   });

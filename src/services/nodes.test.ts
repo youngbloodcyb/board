@@ -14,6 +14,11 @@ vi.mock("@/lib/blob", () => ({
   ),
 }));
 
+vi.mock("@/services/board-access", () => ({
+  requireBoardAccess: vi.fn(),
+  requireNodeAccess: vi.fn(),
+}));
+
 vi.mock("@/db", () => ({
   db: {
     select: vi.fn(),
@@ -37,6 +42,7 @@ import { db as _db } from "@/db";
 import type { NodeData, StoredNode } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
 import { blobExists, deleteBlob } from "@/lib/blob";
+import { requireBoardAccess, requireNodeAccess } from "@/services/board-access";
 import {
   createNode,
   duplicateNode,
@@ -52,6 +58,8 @@ const mockBlobExists = vi.mocked(blobExists);
 const mockDeleteBlob = vi.mocked(deleteBlob);
 const mockStart = vi.mocked(start);
 const mockWorkflowEmbedNode = vi.mocked(workflowEmbedNode);
+const mockRequireBoardAccess = vi.mocked(requireBoardAccess);
+const mockRequireNodeAccess = vi.mocked(requireNodeAccess);
 
 function chainable(value: unknown) {
   const p = Promise.resolve(value) as any;
@@ -107,6 +115,14 @@ beforeEach(() => {
   db.delete.mockReset();
   mockRequireUser.mockResolvedValue(USER_A as any);
   mockBlobExists.mockResolvedValue(true);
+  mockRequireBoardAccess.mockResolvedValue({
+    board: BOARD_A,
+    role: "owner",
+  });
+  mockRequireNodeAccess.mockImplementation(async (nodeId) => ({
+    node: storedNode({ id: nodeId }),
+    access: { board: BOARD_A, role: "owner" },
+  }));
 });
 
 describe("listNodesByBoard", () => {
@@ -196,7 +212,14 @@ describe("listNodesByBoard", () => {
 
 describe("createNode", () => {
   function setupBoardLookup(board: unknown) {
-    db.select.mockReturnValue(chainable(board ? [board] : []));
+    if (board) {
+      mockRequireBoardAccess.mockResolvedValue({
+        board: board as typeof BOARD_A,
+        role: "owner",
+      });
+    } else {
+      mockRequireBoardAccess.mockRejectedValue(new Error("Board not found"));
+    }
   }
 
   function setupInsert() {
@@ -270,6 +293,31 @@ describe("createNode", () => {
         type: "text",
         data: { kind: "text", text: "hello" },
       }),
+    );
+  });
+
+  it("stores the board owner on nodes created by an editor", async () => {
+    mockRequireUser.mockResolvedValue({ ...USER_A, id: "editor-a" } as any);
+    mockRequireBoardAccess.mockResolvedValue({
+      board: BOARD_A,
+      role: "editor",
+    });
+    const query = setupInsert();
+
+    await createNode({
+      boardId: BOARD_A.id,
+      type: "text",
+      position: { x: 0, y: 0 },
+      data: { kind: "text", text: "from editor" },
+    });
+
+    expect(query.values).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: BOARD_A.userId }),
+    );
+    expect(mockRequireBoardAccess).toHaveBeenCalledWith(
+      BOARD_A.id,
+      "editor-a",
+      "edit",
     );
   });
 
@@ -430,7 +478,14 @@ describe("updateNode", () => {
 
 describe("patchImageNode", () => {
   function setupNodeLookup(node: StoredNode | null) {
-    db.select.mockReturnValue(chainable(node ? [node] : []));
+    if (node) {
+      mockRequireNodeAccess.mockResolvedValue({
+        node,
+        access: { board: BOARD_A, role: "owner" },
+      });
+    } else {
+      mockRequireNodeAccess.mockRejectedValue(new Error("Node not found"));
+    }
   }
 
   function setupUpdate(rowCount: number) {
@@ -534,7 +589,14 @@ describe("patchImageNode", () => {
 
 describe("removeNode", () => {
   function setupNodeLookup(node: StoredNode | null) {
-    db.select.mockReturnValue(chainable(node ? [node] : []));
+    if (node) {
+      mockRequireNodeAccess.mockResolvedValue({
+        node,
+        access: { board: BOARD_A, role: "owner" },
+      });
+    } else {
+      mockRequireNodeAccess.mockRejectedValue(new Error("Node not found"));
+    }
   }
 
   function setupDelete(rowCount: number) {
@@ -620,13 +682,22 @@ describe("removeNode", () => {
 
 describe("duplicateNode", () => {
   function setupLookups(srcNode: StoredNode | null, board: unknown) {
-    let call = 0;
-    db.select.mockImplementation(() => {
-      call += 1;
-      return chainable(
-        call === 1 ? (srcNode ? [srcNode] : []) : board ? [board] : [],
-      );
-    });
+    if (srcNode) {
+      mockRequireNodeAccess.mockResolvedValue({
+        node: srcNode,
+        access: { board: BOARD_A, role: "owner" },
+      });
+    } else {
+      mockRequireNodeAccess.mockRejectedValue(new Error("Node not found"));
+    }
+    if (board) {
+      mockRequireBoardAccess.mockResolvedValue({
+        board: board as typeof BOARD_A,
+        role: "owner",
+      });
+    } else {
+      mockRequireBoardAccess.mockRejectedValue(new Error("Board not found"));
+    }
   }
 
   function setupInsert() {
@@ -705,6 +776,7 @@ describe("duplicateNode", () => {
         searchText: "hello",
       }),
     );
+    expect(mockRequireNodeAccess).toHaveBeenCalledWith("n1", USER_A.id, "edit");
     expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [result]);
   });
 

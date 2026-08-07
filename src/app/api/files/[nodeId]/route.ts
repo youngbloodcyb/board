@@ -1,8 +1,7 @@
 import { get } from "@vercel/blob";
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { type NodeData, nodes } from "@/db/schema";
+import type { NodeData } from "@/db/schema";
 import { getSession } from "@/lib/auth-server";
+import { requireNodeAccess } from "@/services/board-access";
 
 export async function GET(
   req: Request,
@@ -12,15 +11,13 @@ export async function GET(
   const session = await getSession();
   if (!session?.user) return new Response("Unauthorized", { status: 401 });
 
-  const rows = await db
-    .select()
-    .from(nodes)
-    .where(eq(nodes.id, nodeId))
-    .limit(1);
-  const node = rows[0];
-  if (!node || node.userId !== session.user.id) {
-    return new Response("Not found", { status: 404 });
-  }
+  const nodeAccess = await requireNodeAccess(
+    nodeId,
+    session.user.id,
+    "view",
+  ).catch(() => null);
+  if (!nodeAccess) return new Response("Not found", { status: 404 });
+  const { node } = nodeAccess;
 
   const data = node.data as NodeData;
   let objectKey: string | undefined;

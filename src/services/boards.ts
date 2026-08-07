@@ -1,28 +1,57 @@
 "use server";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { type Board, boards, nodes } from "@/db/schema";
+import { boardShares, boards, nodes } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
 import { deleteBlob, nodeObjectKey } from "@/lib/blob";
+import { type BoardAccessRole, findBoardAccess } from "@/services/board-access";
 
-export async function listBoards(): Promise<Board[]> {
-  const user = await requireUser();
-  return db
-    .select()
-    .from(boards)
-    .where(eq(boards.userId, user.id))
-    .orderBy(desc(boards.createdAt));
-}
+export type AccessibleBoard = {
+  id: string;
+  name: string;
+  createdAt: Date;
+  accessRole: BoardAccessRole;
+};
 
-export async function getBoard(boardId: string): Promise<Board | null> {
+export async function listBoards(): Promise<AccessibleBoard[]> {
   const user = await requireUser();
   const rows = await db
-    .select()
+    .select({
+      id: boards.id,
+      name: boards.name,
+      createdAt: boards.createdAt,
+      ownerId: boards.userId,
+      sharedRole: boardShares.role,
+    })
     .from(boards)
-    .where(and(eq(boards.id, boardId), eq(boards.userId, user.id)))
-    .limit(1);
-  return rows[0] ?? null;
+    .leftJoin(
+      boardShares,
+      and(eq(boardShares.boardId, boards.id), eq(boardShares.userId, user.id)),
+    )
+    .where(or(eq(boards.userId, user.id), isNotNull(boardShares.userId)))
+    .orderBy(desc(boards.createdAt));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt,
+    accessRole:
+      row.ownerId === user.id ? "owner" : (row.sharedRole as BoardAccessRole),
+  }));
+}
+
+export async function getBoard(
+  boardId: string,
+): Promise<AccessibleBoard | null> {
+  const user = await requireUser();
+  const access = await findBoardAccess(boardId, user.id);
+  if (!access) return null;
+  return {
+    id: access.board.id,
+    name: access.board.name,
+    createdAt: access.board.createdAt,
+    accessRole: access.role,
+  };
 }
 
 export async function createBoard(name: string): Promise<string> {
@@ -50,7 +79,7 @@ export async function deleteBoard(boardId: string): Promise<void> {
   const rows = await db
     .select({ data: nodes.data })
     .from(nodes)
-    .where(and(eq(nodes.boardId, boardId), eq(nodes.userId, user.id)));
+    .where(eq(nodes.boardId, boardId));
   const keys = rows
     .map((r) => nodeObjectKey(r.data as { kind: string; objectKey?: string }))
     .filter((k): k is string => !!k);

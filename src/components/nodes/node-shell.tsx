@@ -2,6 +2,7 @@
 
 import { ResizeIcon } from "@phosphor-icons/react";
 import { NodeResizeControl } from "@xyflow/react";
+import { useBoardPermissions } from "@/components/board-permissions";
 import { cn } from "@/lib/utils";
 
 const resizeControlStyle = {
@@ -37,6 +38,7 @@ export function NodeShell({
   className?: string;
   children: React.ReactNode;
 }) {
+  const { canEdit } = useBoardPermissions();
   return (
     <div
       className={cn(
@@ -45,14 +47,16 @@ export function NodeShell({
         className,
       )}
     >
-      <NodeResizeControl
-        style={resizeControlStyle}
-        minWidth={minWidth}
-        minHeight={minHeight}
-        keepAspectRatio={keepAspectRatio}
-      >
-        <ResizeIcon size={12} className="text-muted-foreground" />
-      </NodeResizeControl>
+      {canEdit && (
+        <NodeResizeControl
+          style={resizeControlStyle}
+          minWidth={minWidth}
+          minHeight={minHeight}
+          keepAspectRatio={keepAspectRatio}
+        >
+          <ResizeIcon size={12} className="text-muted-foreground" />
+        </NodeResizeControl>
+      )}
       {children}
     </div>
   );

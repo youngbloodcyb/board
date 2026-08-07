@@ -25,8 +25,13 @@ export default async function BoardsPage() {
                 className="flex aspect-[4/3] flex-col justify-end rounded-lg border bg-card p-4 transition-colors hover:bg-muted"
               >
                 <div className="truncate text-sm font-medium">{b.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {new Date(b.createdAt).toLocaleDateString()}
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{new Date(b.createdAt).toLocaleDateString()}</span>
+                  {b.accessRole !== "owner" && (
+                    <span className="rounded-full bg-muted px-2 py-0.5 capitalize">
+                      {b.accessRole}
+                    </span>
+                  )}
                 </div>
               </Link>
             </li>

@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -204,6 +205,37 @@ export const boards = pgTable(
   (t) => [index("boards_userId_createdAt_idx").on(t.userId, t.createdAt)],
 );
 
+export const boardShareRoleEnum = pgEnum("board_share_role", [
+  "viewer",
+  "editor",
+]);
+
+export const boardShares = pgTable(
+  "board_shares",
+  {
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: boardShareRoleEnum("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      name: "board_shares_boardId_userId_pk",
+      columns: [t.boardId, t.userId],
+    }),
+    index("board_shares_userId_boardId_idx").on(t.userId, t.boardId),
+  ],
+);
+
 export const nodeTypeEnum = pgEnum("node_type", [
   "link",
   "text",
@@ -283,5 +315,7 @@ export type Account = typeof account.$inferSelect;
 export type Verification = typeof verification.$inferSelect;
 export type Jwks = typeof jwks.$inferSelect;
 export type Board = typeof boards.$inferSelect;
+export type BoardShare = typeof boardShares.$inferSelect;
+export type BoardShareRole = BoardShare["role"];
 export type StoredNode = typeof nodes.$inferSelect;
 export type StoredEmbedding = typeof embeddings.$inferSelect;

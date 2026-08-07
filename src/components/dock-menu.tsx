@@ -1,12 +1,7 @@
 "use client";
 
 import type { Icon } from "@phosphor-icons/react";
-import {
-  BinocularsIcon,
-  FadersIcon,
-  GearIcon,
-  PersonIcon,
-} from "@phosphor-icons/react";
+import { BinocularsIcon, FadersIcon, GearIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -17,10 +12,6 @@ interface DockMenuOption {
 }
 
 const options: DockMenuOption[] = [
-  {
-    name: "share",
-    icon: PersonIcon,
-  },
   {
     name: "properties",
     icon: FadersIcon,

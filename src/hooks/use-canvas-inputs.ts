@@ -7,7 +7,7 @@ import {
   isEditableTarget,
 } from "@/lib/board-utils";
 
-export function useCanvasInputs(boardId: string) {
+export function useCanvasInputs(boardId: string, enabled = true) {
   const { addDraft } = useBoardActions(boardId);
   const { screenToFlowPosition } = useReactFlow();
 
@@ -21,6 +21,7 @@ export function useCanvasInputs(boardId: string) {
   );
 
   useEffect(() => {
+    if (!enabled) return;
     const handler = (e: ClipboardEvent) => {
       if (isEditableTarget(e.target)) return;
       const data = e.clipboardData;
@@ -48,15 +49,20 @@ export function useCanvasInputs(boardId: string) {
     };
     window.addEventListener("paste", handler);
     return () => window.removeEventListener("paste", handler);
-  }, [addDraft, viewportCenter]);
+  }, [addDraft, enabled, viewportCenter]);
 
-  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }, []);
+  const onDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!enabled) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    [enabled],
+  );
 
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
+      if (!enabled) return;
       e.preventDefault();
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
@@ -75,7 +81,7 @@ export function useCanvasInputs(boardId: string) {
         }
       }
     },
-    [addDraft, screenToFlowPosition],
+    [addDraft, enabled, screenToFlowPosition],
   );
 
   return { onDragOver, onDrop };

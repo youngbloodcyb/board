@@ -13,6 +13,10 @@ vi.mock("@/lib/blob", () => ({
   ),
 }));
 
+vi.mock("@/services/board-access", () => ({
+  findBoardAccess: vi.fn(),
+}));
+
 vi.mock("@/db", () => ({
   db: {
     select: vi.fn(),
@@ -25,6 +29,7 @@ vi.mock("@/db", () => ({
 import { db as _db } from "@/db";
 import { requireUser } from "@/lib/auth-server";
 import { deleteBlob } from "@/lib/blob";
+import { findBoardAccess } from "@/services/board-access";
 import {
   createBoard,
   deleteBoard,
@@ -36,10 +41,12 @@ import {
 const db = _db as any;
 const mockRequireUser = vi.mocked(requireUser);
 const mockDeleteBlob = vi.mocked(deleteBlob);
+const mockFindBoardAccess = vi.mocked(findBoardAccess);
 
 function chainable(value: unknown) {
   const p = Promise.resolve(value) as any;
   p.from = vi.fn().mockReturnThis();
+  p.leftJoin = vi.fn().mockReturnThis();
   p.where = vi.fn().mockReturnThis();
   p.orderBy = vi.fn().mockReturnThis();
   p.limit = vi.fn().mockReturnThis();
@@ -67,6 +74,7 @@ const BOARD_A = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockRequireUser.mockResolvedValue(USER_A);
+  mockFindBoardAccess.mockResolvedValue({ board: BOARD_A, role: "owner" });
 });
 
 describe("listBoards", () => {
@@ -76,10 +84,25 @@ describe("listBoards", () => {
   });
 
   it("returns the signed-in user's boards newest first", async () => {
-    const query = chainable([BOARD_A]);
+    const query = chainable([
+      {
+        id: BOARD_A.id,
+        name: BOARD_A.name,
+        createdAt: BOARD_A.createdAt,
+        ownerId: BOARD_A.userId,
+        sharedRole: null,
+      },
+    ]);
     db.select.mockReturnValue(query);
     const result = await listBoards();
-    expect(result).toEqual([BOARD_A]);
+    expect(result).toEqual([
+      {
+        id: BOARD_A.id,
+        name: BOARD_A.name,
+        createdAt: BOARD_A.createdAt,
+        accessRole: "owner",
+      },
+    ]);
     expect(query.where).toHaveBeenCalled();
     expect(query.orderBy).toHaveBeenCalled();
   });
@@ -88,24 +111,51 @@ describe("listBoards", () => {
     db.select.mockReturnValue(chainable([]));
     expect(await listBoards()).toEqual([]);
   });
+
+  it("includes boards shared with the signed-in user and their role", async () => {
+    const shared = { ...BOARD_A, id: "board-shared", userId: "owner-b" };
+    db.select.mockReturnValue(
+      chainable([
+        {
+          id: shared.id,
+          name: shared.name,
+          createdAt: shared.createdAt,
+          ownerId: shared.userId,
+          sharedRole: "viewer",
+        },
+      ]),
+    );
+
+    await expect(listBoards()).resolves.toEqual([
+      {
+        id: shared.id,
+        name: shared.name,
+        createdAt: shared.createdAt,
+        accessRole: "viewer",
+      },
+    ]);
+  });
 });
 
 describe("getBoard", () => {
   it("returns the board when owned by the user", async () => {
-    const query = chainable([BOARD_A]);
-    db.select.mockReturnValue(query);
     const result = await getBoard("board-a");
-    expect(result).toEqual(BOARD_A);
-    expect(query.limit).toHaveBeenCalledWith(1);
+    expect(result).toEqual({
+      id: BOARD_A.id,
+      name: BOARD_A.name,
+      createdAt: BOARD_A.createdAt,
+      accessRole: "owner",
+    });
+    expect(mockFindBoardAccess).toHaveBeenCalledWith("board-a", USER_A.id);
   });
 
   it("returns null for a board owned by another user (conceals unowned)", async () => {
-    db.select.mockReturnValue(chainable([]));
+    mockFindBoardAccess.mockResolvedValue(null);
     expect(await getBoard("board-b")).toBeNull();
   });
 
   it("returns null for a missing board (same as unowned)", async () => {
-    db.select.mockReturnValue(chainable([]));
+    mockFindBoardAccess.mockResolvedValue(null);
     expect(await getBoard("nonexistent")).toBeNull();
   });
 

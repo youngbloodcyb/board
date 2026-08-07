@@ -1,10 +1,8 @@
 import { workflowEmbedNode } from "@workflows/embed";
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { start } from "workflow/api";
-import { db } from "@/db";
-import { nodes } from "@/db/schema";
 import { getSession } from "@/lib/auth-server";
+import { requireNodeAccess } from "@/services/board-access";
 
 export async function POST(req: Request) {
   const session = await getSession();
@@ -14,17 +12,13 @@ export async function POST(req: Request) {
 
   const { nodeId } = (await req.json()) as { nodeId: string };
 
-  const rows = await db
-    .select({
-      id: nodes.id,
-    })
-    .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, session.user.id)))
-    .limit(1);
-  const node = rows[0];
-  if (!node) {
+  const access = await requireNodeAccess(nodeId, session.user.id, "edit").catch(
+    () => null,
+  );
+  if (!access) {
     return NextResponse.json({ error: "Node not found" }, { status: 404 });
   }
+  const { node } = access;
 
   await start(workflowEmbedNode, [node.id]);
 

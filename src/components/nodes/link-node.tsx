@@ -2,16 +2,18 @@
 
 import type { NodeProps } from "@xyflow/react";
 import { useEffect, useRef } from "react";
+import { useBoardPermissions } from "@/components/board-permissions";
 import { NodeShell } from "@/components/nodes/node-shell";
 import { useEditNodeData } from "@/hooks/use-edit-node-data";
 import type { LinkNode as LinkNodeType } from "@/lib/store";
 
 export function LinkNode({ id, data, selected }: NodeProps<LinkNodeType>) {
+  const { canEdit } = useBoardPermissions();
   const editNodeData = useEditNodeData();
   const triedRef = useRef(false);
 
   useEffect(() => {
-    if (data.og || triedRef.current) return;
+    if (!canEdit || data.og || triedRef.current) return;
     triedRef.current = true;
 
     fetch(`/api/og?url=${encodeURIComponent(data.url)}`)
@@ -21,7 +23,7 @@ export function LinkNode({ id, data, selected }: NodeProps<LinkNodeType>) {
         editNodeData(id, { kind: "link", url: data.url, og });
       })
       .catch(() => {});
-  }, [id, data.url, data.og, editNodeData]);
+  }, [canEdit, id, data.url, data.og, editNodeData]);
 
   let host = data.url;
   try {

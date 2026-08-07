@@ -64,17 +64,30 @@ export async function searchNodes(
   const finalBoardFilter = boardId ? sql`AND n.board_id = ${boardId}` : sql``;
 
   const result = await db.execute<SearchRow>(sql`
-    WITH semantic_candidates AS (
+    WITH accessible_boards AS (
+      SELECT b.id
+      FROM boards b
+      WHERE b.user_id = ${user.id}
+        OR EXISTS (
+          SELECT 1
+          FROM board_shares bs
+          WHERE bs.board_id = b.id
+            AND bs.user_id = ${user.id}
+        )
+    ),
+    semantic_candidates AS (
       SELECT
         e.node_id,
         e.embedding <=> ${queryEmbedding}::vector AS distance
       FROM embeddings e
+      INNER JOIN accessible_boards accessible
+        ON accessible.id = e.board_id
       INNER JOIN nodes indexed_node
         ON indexed_node.id = e.node_id
         AND indexed_node.user_id = e.user_id
         AND indexed_node.board_id = e.board_id
         AND indexed_node.embedding_source = e.source_key
-      WHERE e.user_id = ${user.id}
+      WHERE true
         ${semanticBoardFilter}
       ORDER BY e.embedding <=> ${queryEmbedding}::vector
       LIMIT ${candidateLimit}
@@ -93,7 +106,9 @@ export async function searchNodes(
           websearch_to_tsquery('simple', ${query})
         ) AS relevance
       FROM nodes n
-      WHERE n.user_id = ${user.id}
+      INNER JOIN accessible_boards accessible
+        ON accessible.id = n.board_id
+      WHERE true
         ${keywordBoardFilter}
         AND to_tsvector('simple', n.search_text)
           @@ websearch_to_tsquery('simple', ${query})
@@ -129,9 +144,10 @@ export async function searchNodes(
     FROM candidates
     INNER JOIN nodes n ON n.id = candidates.node_id
     INNER JOIN boards b ON b.id = n.board_id
+    INNER JOIN accessible_boards accessible ON accessible.id = n.board_id
     LEFT JOIN semantic ON semantic.node_id = n.id
     LEFT JOIN keyword ON keyword.node_id = n.id
-    WHERE n.user_id = ${user.id}
+    WHERE true
       ${finalBoardFilter}
     ORDER BY score DESC, n.updated_at DESC
     LIMIT ${limit}

@@ -46,7 +46,7 @@ describe("searchNodes", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
-  it("scopes both retrieval branches and the final result to the user", async () => {
+  it("scopes both retrieval branches and the final result to accessible boards", async () => {
     await searchNodes({
       query: "quarterly report",
       boardId: "board-a",
@@ -55,8 +55,10 @@ describe("searchNodes", () => {
 
     const statement = mocks.execute.mock.calls[0][0];
     const compiled = new PgDialect().sqlToQuery(statement);
-    expect(compiled.sql).toContain("e.user_id =");
-    expect(compiled.sql).toContain("n.user_id =");
+    expect(compiled.sql).toContain("WITH accessible_boards AS");
+    expect(compiled.sql).toContain("FROM board_shares bs");
+    expect(compiled.sql).toContain("accessible.id = e.board_id");
+    expect(compiled.sql).toContain("accessible.id = n.board_id");
     expect(compiled.sql).toContain("e.board_id =");
     expect(compiled.sql).toContain("n.board_id =");
     expect(compiled.params).toContain("user-a");
