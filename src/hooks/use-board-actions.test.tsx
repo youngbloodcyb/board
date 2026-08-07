@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   createNode: vi.fn(),
   updateNode: vi.fn(),
+  patchImageNode: vi.fn(),
   extractPdfMarkdown: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -25,7 +26,7 @@ vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
 vi.mock("@/services/nodes", () => ({
   createNode: mocks.createNode,
   duplicateNode: vi.fn(),
-  patchImageNode: vi.fn(),
+  patchImageNode: mocks.patchImageNode,
   removeNode: vi.fn(),
   updateNode: mocks.updateNode,
 }));
@@ -287,5 +288,46 @@ describe("addDraft optimistic nodes", () => {
         },
       }),
     );
+  });
+});
+
+describe("replaceImage", () => {
+  it("persists the replacement and refreshes the rendered image URL", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1234);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      blob: async () => new Blob(["cropped"], { type: "image/png" }),
+    } as Response);
+    mocks.upload.mockResolvedValue({
+      pathname: "user-a/board-a/crop.png",
+    });
+    useBoardStore.setState({
+      nodes: [
+        {
+          id: "image-1",
+          type: "image",
+          position: { x: 0, y: 0 },
+          data: {
+            kind: "image",
+            src: "/api/files/image-1",
+            alt: "Photo",
+          },
+        },
+      ],
+    });
+    const { result } = renderHook(() => useBoardActions("board-a"));
+
+    await act(() =>
+      result.current.replaceImage("image-1", "data:image/png;base64,crop"),
+    );
+
+    expect(mocks.patchImageNode).toHaveBeenCalledWith({
+      nodeId: "image-1",
+      objectKey: "user-a/board-a/crop.png",
+    });
+    expect(useBoardStore.getState().nodes[0]?.data).toEqual({
+      kind: "image",
+      src: "/api/files/image-1?v=1234",
+      alt: "Photo",
+    });
   });
 });

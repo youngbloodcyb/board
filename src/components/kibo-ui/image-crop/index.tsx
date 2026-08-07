@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { CropIcon, RotateCcwIcon } from "lucide-react";
 import { Slot } from "radix-ui";
 import {
@@ -19,11 +18,13 @@ import {
 } from "react";
 import ReactCrop, {
   centerCrop,
+  convertToPixelCrop,
   makeAspectCrop,
   type PercentCrop,
   type PixelCrop,
   type ReactCropProps,
 } from "react-image-crop";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import "react-image-crop/dist/ReactCrop.css";
@@ -31,7 +32,7 @@ import "react-image-crop/dist/ReactCrop.css";
 const centerAspectCrop = (
   mediaWidth: number,
   mediaHeight: number,
-  aspect: number | undefined
+  aspect: number | undefined,
 ): PercentCrop =>
   centerCrop(
     aspect
@@ -42,18 +43,18 @@ const centerAspectCrop = (
           },
           aspect,
           mediaWidth,
-          mediaHeight
+          mediaHeight,
         )
       : { x: 0, y: 0, width: 90, height: 90, unit: "%" },
     mediaWidth,
-    mediaHeight
+    mediaHeight,
   );
 
 const getCroppedPngImage = async (
   imageSrc: HTMLImageElement,
   scaleFactor: number,
   pixelCrop: PixelCrop,
-  maxImageSize: number
+  maxImageSize: number,
 ): Promise<string> => {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
@@ -65,9 +66,16 @@ const getCroppedPngImage = async (
   const scaleX = imageSrc.naturalWidth / imageSrc.width;
   const scaleY = imageSrc.naturalHeight / imageSrc.height;
 
-  ctx.imageSmoothingEnabled = false;
-  canvas.width = pixelCrop.width;
-  canvas.height = pixelCrop.height;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  canvas.width = Math.max(
+    1,
+    Math.round(pixelCrop.width * scaleX * scaleFactor),
+  );
+  canvas.height = Math.max(
+    1,
+    Math.round(pixelCrop.height * scaleY * scaleFactor),
+  );
 
   ctx.drawImage(
     imageSrc,
@@ -78,19 +86,19 @@ const getCroppedPngImage = async (
     0,
     0,
     canvas.width,
-    canvas.height
+    canvas.height,
   );
 
   const croppedImageUrl = canvas.toDataURL("image/png");
   const response = await fetch(croppedImageUrl);
   const blob = await response.blob();
 
-  if (blob.size > maxImageSize) {
+  if (blob.size > maxImageSize && (canvas.width > 1 || canvas.height > 1)) {
     return await getCroppedPngImage(
       imageSrc,
-      scaleFactor * 0.9,
+      scaleFactor * Math.min(0.9, Math.sqrt(maxImageSize / blob.size)),
       pixelCrop,
-      maxImageSize
+      maxImageSize,
     );
   }
 
@@ -104,13 +112,10 @@ type ImageCropContextType = {
   crop: PercentCrop | undefined;
   completedCrop: PixelCrop | null;
   imgRef: RefObject<HTMLImageElement | null>;
-  onCrop?: (croppedImage: string) => void;
+  onCrop?: (croppedImage: string) => void | Promise<void>;
   reactCropProps: Omit<ReactCropProps, "onChange" | "onComplete" | "children">;
   handleChange: (pixelCrop: PixelCrop, percentCrop: PercentCrop) => void;
-  handleComplete: (
-    pixelCrop: PixelCrop,
-    percentCrop: PercentCrop
-  ) => Promise<void>;
+  handleComplete: (pixelCrop: PixelCrop, percentCrop: PercentCrop) => void;
   onImageLoad: (e: SyntheticEvent<HTMLImageElement>) => void;
   applyCrop: () => Promise<void>;
   resetCrop: () => void;
@@ -129,7 +134,7 @@ const useImageCrop = () => {
 export type ImageCropProps = {
   file: File;
   maxImageSize?: number;
-  onCrop?: (croppedImage: string) => void;
+  onCrop?: (croppedImage: string) => void | Promise<void>;
   children: ReactNode;
   onChange?: ReactCropProps["onChange"];
   onComplete?: ReactCropProps["onComplete"];
@@ -153,7 +158,7 @@ export const ImageCrop = ({
   useEffect(() => {
     const reader = new FileReader();
     reader.addEventListener("load", () =>
-      setImgSrc(reader.result?.toString() || "")
+      setImgSrc(reader.result?.toString() || ""),
     );
     reader.readAsDataURL(file);
   }, [file]);
@@ -164,8 +169,9 @@ export const ImageCrop = ({
       const newCrop = centerAspectCrop(width, height, reactCropProps.aspect);
       setCrop(newCrop);
       setInitialCrop(newCrop);
+      setCompletedCrop(convertToPixelCrop(newCrop, width, height));
     },
-    [reactCropProps.aspect]
+    [reactCropProps.aspect],
   );
 
   const handleChange = (pixelCrop: PixelCrop, percentCrop: PercentCrop) => {
@@ -173,11 +179,7 @@ export const ImageCrop = ({
     onChange?.(pixelCrop, percentCrop);
   };
 
-  // biome-ignore lint/suspicious/useAwait: "onComplete is async"
-  const handleComplete = async (
-    pixelCrop: PixelCrop,
-    percentCrop: PercentCrop
-  ) => {
+  const handleComplete = (pixelCrop: PixelCrop, percentCrop: PercentCrop) => {
     setCompletedCrop(pixelCrop);
     onComplete?.(pixelCrop, percentCrop);
   };
@@ -191,16 +193,22 @@ export const ImageCrop = ({
       imgRef.current,
       1,
       completedCrop,
-      maxImageSize
+      maxImageSize,
     );
 
-    onCrop?.(croppedImage);
+    await onCrop?.(croppedImage);
   };
 
   const resetCrop = () => {
-    if (initialCrop) {
+    if (initialCrop && imgRef.current) {
       setCrop(initialCrop);
-      setCompletedCrop(null);
+      setCompletedCrop(
+        convertToPixelCrop(
+          initialCrop,
+          imgRef.current.width,
+          imgRef.current.height,
+        ),
+      );
     }
   };
 

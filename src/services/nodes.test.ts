@@ -287,8 +287,30 @@ describe("createNode", () => {
       expect.objectContaining({
         type: "image",
         data: { kind: "image", objectKey: "user-a/board-a/img1", alt: "pic" },
+        embeddingSource: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     );
+    expect(mockStart).toHaveBeenCalledOnce();
+  });
+
+  it("embeds an image even when it has no alt text", async () => {
+    setupBoardLookup(BOARD_A);
+    const query = setupInsert();
+
+    const id = await createNode({
+      boardId: "board-a",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: { kind: "image", objectKey: "user-a/board-a/unlabeled" },
+    });
+
+    expect(query.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        searchText: "",
+        embeddingSource: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, [id]);
   });
 
   it("creates a pdf node after verifying the blob exists", async () => {
@@ -460,6 +482,7 @@ describe("patchImageNode", () => {
     expect(setCall.data.fit).toBe("contain");
     expect(setCall.data.objectKey).toBe("user-a/board-a/img1");
     expect(mockDeleteBlob).not.toHaveBeenCalled();
+    expect(mockStart).not.toHaveBeenCalled();
   });
 
   it("replaces the backing object and deletes the old blob", async () => {
@@ -477,6 +500,7 @@ describe("patchImageNode", () => {
     expect(setCall.data.objectKey).toBe("user-a/board-a/new");
     expect(setCall.data.url).toBeUndefined();
     expect(mockDeleteBlob).toHaveBeenCalledWith("user-a/board-a/old");
+    expect(mockStart).toHaveBeenCalledWith(mockWorkflowEmbedNode, ["img-1"]);
   });
 
   it("does not delete a blob when there was no previous objectKey", async () => {

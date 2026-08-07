@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
 import { blobExists, deleteBlob, nodeObjectKey } from "@/lib/blob";
+import { nodeEmbeddingSourceKey } from "@/lib/embedding-source";
 import { nodeSearchText } from "@/lib/node-search";
 
 async function scheduleNodeEmbedding(nodeId: string): Promise<void> {
@@ -109,6 +110,7 @@ export async function createNode(input: {
 
   const id = crypto.randomUUID();
   const searchText = nodeSearchText(input.data);
+  const embeddingSource = nodeEmbeddingSourceKey(input.data, searchText);
   await db.insert(nodes).values({
     id,
     boardId: input.boardId,
@@ -120,8 +122,9 @@ export async function createNode(input: {
     height: input.style?.height,
     data: input.data,
     searchText,
+    embeddingSource,
   });
-  if (searchText) await scheduleNodeEmbedding(id);
+  if (embeddingSource) await scheduleNodeEmbedding(id);
   return id;
 }
 
@@ -139,8 +142,10 @@ export async function updateNode(input: {
     set.positionY = input.position.y;
   }
   if (input.data) {
+    const searchText = nodeSearchText(input.data);
     set.data = input.data;
-    set.searchText = nodeSearchText(input.data);
+    set.searchText = searchText;
+    set.embeddingSource = nodeEmbeddingSourceKey(input.data, searchText);
   }
   if (input.style) {
     set.width = input.style.width;
@@ -173,12 +178,21 @@ export async function patchImageNode(input: {
     next.url = undefined;
   }
 
+  const searchText = nodeSearchText(next);
+  const embeddingSource = nodeEmbeddingSourceKey(next, searchText);
+
   const result = await db
     .update(nodes)
-    .set({ data: next, updatedAt: new Date() })
+    .set({
+      data: next,
+      searchText,
+      embeddingSource,
+      updatedAt: new Date(),
+    })
     .where(and(eq(nodes.id, input.nodeId), eq(nodes.userId, user.id)));
   if (result.rowCount === 0) throw new Error("Node not found");
 
+  if (input.objectKey !== undefined) await scheduleNodeEmbedding(input.nodeId);
   if (oldKey) await deleteBlob(oldKey);
 }
 
@@ -204,6 +218,7 @@ export async function duplicateNode(input: {
   await requireOwnedBoard(input.boardId, user.id);
   const id = crypto.randomUUID();
   const searchText = nodeSearchText(src.data);
+  const embeddingSource = nodeEmbeddingSourceKey(src.data, searchText);
   await db.insert(nodes).values({
     id,
     boardId: input.boardId,
@@ -216,7 +231,8 @@ export async function duplicateNode(input: {
     zIndex: src.zIndex ?? undefined,
     data: src.data,
     searchText,
+    embeddingSource,
   });
-  if (searchText) await scheduleNodeEmbedding(id);
+  if (embeddingSource) await scheduleNodeEmbedding(id);
   return id;
 }

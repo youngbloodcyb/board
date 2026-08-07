@@ -365,6 +365,19 @@ export function useBoardActions(boardId: string) {
       });
       const objectKey = await uploadFile(file);
       await patchImageNode({ nodeId, objectKey });
+      useBoardStore.setState((s) => ({
+        nodes: s.nodes.map((node) =>
+          node.id === nodeId && node.data.kind === "image"
+            ? ({
+                ...node,
+                data: {
+                  ...node.data,
+                  src: `/api/files/${nodeId}?v=${Date.now()}`,
+                },
+              } as BoardNode)
+            : node,
+        ),
+      }));
     },
     [uploadFile],
   );

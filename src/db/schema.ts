@@ -229,6 +229,9 @@ export const nodes = pgTable(
     zIndex: integer("z_index"),
     data: jsonb("data").notNull().$type<NodeData>(),
     searchText: text("search_text").notNull().default(""),
+    // Changes whenever the semantic embedding input changes. Unlike
+    // searchText, this also versions binary inputs such as image blobs.
+    embeddingSource: text("embedding_source"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -262,7 +265,7 @@ export const embeddings = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    content: text("content"),
+    sourceKey: text("source_key").notNull(),
     embedding: vector("embedding", { dimensions: 1536 }).notNull(),
   },
   (t) => [

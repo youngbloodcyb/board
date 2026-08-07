@@ -156,5 +156,29 @@ describe("GET /api/files/[nodeId]", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
     expect(res.headers.get("etag")).toBe("abc123");
+    expect(res.headers.get("cache-control")).toBe("private, no-cache");
+  });
+
+  it("requires cached files to be revalidated", async () => {
+    db.select.mockReturnValue(
+      chainable([
+        {
+          id: "n1",
+          userId: "user-a",
+          data: { kind: "image", objectKey: "user-a/board-a/img1" },
+        },
+      ]),
+    );
+    mockGet.mockResolvedValue({
+      statusCode: 304,
+      blob: { etag: "abc123" },
+    } as never);
+    const [request, context] = makeReq("n1");
+
+    const response = await GET(request, context);
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("etag")).toBe("abc123");
+    expect(response.headers.get("cache-control")).toBe("private, no-cache");
   });
 });

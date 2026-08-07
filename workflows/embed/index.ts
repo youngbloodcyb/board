@@ -1,24 +1,28 @@
 import {
   stepDeleteEmbedding,
+  stepEmbedImage,
   stepEmbedText,
-  stepGetNodeSearchText,
+  stepGetNodeEmbeddingSource,
   stepUpsertEmbedding,
 } from "./steps";
 
 export async function workflowEmbedNode(nodeId: string) {
   "use workflow";
 
-  const text = await stepGetNodeSearchText(nodeId);
-  if (!text) {
+  const source = await stepGetNodeEmbeddingSource(nodeId);
+  if (!source) {
     await stepDeleteEmbedding(nodeId);
     return;
   }
 
-  const embedding = await stepEmbedText(text);
+  const embedding =
+    source.kind === "image"
+      ? await stepEmbedImage(source.objectKey)
+      : await stepEmbedText({ title: source.title, text: source.text });
 
   await stepUpsertEmbedding({
     nodeId,
-    content: text,
+    sourceKey: source.sourceKey,
     embedding,
   });
 }

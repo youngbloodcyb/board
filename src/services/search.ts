@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import type { NodeData, NodeType } from "@/db/schema";
 import { requireUser } from "@/lib/auth-server";
-import { embedSearchText } from "@/lib/embedding";
+import { embedSearchQuery } from "@/lib/embedding";
 import { nodeSearchTitle } from "@/lib/node-search";
 
 const searchInputSchema = z.object({
@@ -55,7 +55,7 @@ export async function searchNodes(
   const { query, boardId, limit } = parsed.data;
   if (!query) return [];
 
-  const queryEmbedding = JSON.stringify(await embedSearchText(query));
+  const queryEmbedding = JSON.stringify(await embedSearchQuery(query));
   const candidateLimit = Math.min(Math.max(limit * 5, 50), 200);
   const semanticBoardFilter = boardId
     ? sql`AND e.board_id = ${boardId}`
@@ -73,7 +73,7 @@ export async function searchNodes(
         ON indexed_node.id = e.node_id
         AND indexed_node.user_id = e.user_id
         AND indexed_node.board_id = e.board_id
-        AND indexed_node.search_text = e.content
+        AND indexed_node.embedding_source = e.source_key
       WHERE e.user_id = ${user.id}
         ${semanticBoardFilter}
       ORDER BY e.embedding <=> ${queryEmbedding}::vector

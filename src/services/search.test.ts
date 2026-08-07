@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   requireUser: vi.fn(),
-  embedSearchText: vi.fn(),
+  embedSearchQuery: vi.fn(),
 }));
 
 vi.mock("@/lib/auth-server", () => ({
@@ -11,7 +11,7 @@ vi.mock("@/lib/auth-server", () => ({
 }));
 
 vi.mock("@/lib/embedding", () => ({
-  embedSearchText: mocks.embedSearchText,
+  embedSearchQuery: mocks.embedSearchQuery,
 }));
 
 vi.mock("@/db", () => ({
@@ -26,7 +26,7 @@ import { searchNodes } from "./search";
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireUser.mockResolvedValue({ id: "user-a" });
-  mocks.embedSearchText.mockResolvedValue([0.1, 0.2, 0.3]);
+  mocks.embedSearchQuery.mockResolvedValue([0.1, 0.2, 0.3]);
   mocks.execute.mockResolvedValue({ rows: [] });
 });
 
@@ -37,12 +37,12 @@ describe("searchNodes", () => {
     await expect(searchNodes({ query: "quarterly report" })).rejects.toThrow(
       "Unauthorized",
     );
-    expect(mocks.embedSearchText).not.toHaveBeenCalled();
+    expect(mocks.embedSearchQuery).not.toHaveBeenCalled();
   });
 
   it("returns no results for an empty query without embedding it", async () => {
     await expect(searchNodes({ query: "   " })).resolves.toEqual([]);
-    expect(mocks.embedSearchText).not.toHaveBeenCalled();
+    expect(mocks.embedSearchQuery).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
@@ -63,6 +63,9 @@ describe("searchNodes", () => {
     expect(compiled.params).toContain("board-a");
     expect(compiled.params.filter((value) => value === "board-a")).toHaveLength(
       3,
+    );
+    expect(compiled.sql).toContain(
+      "indexed_node.embedding_source = e.source_key",
     );
   });
 
@@ -112,6 +115,6 @@ describe("searchNodes", () => {
     await expect(searchNodes({ query: "hello", limit: 51 })).rejects.toThrow(
       "Invalid search query",
     );
-    expect(mocks.embedSearchText).not.toHaveBeenCalled();
+    expect(mocks.embedSearchQuery).not.toHaveBeenCalled();
   });
 });

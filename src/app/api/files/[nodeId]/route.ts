@@ -43,14 +43,17 @@ export async function GET(
   if (result.statusCode === 304) {
     return new Response(null, {
       status: 304,
-      headers: { ETag: result.blob.etag },
+      headers: {
+        "Cache-Control": "private, no-cache",
+        ETag: result.blob.etag,
+      },
     });
   }
 
   const headers = new Headers({
     "Content-Type": result.blob.contentType,
     "Content-Length": String(result.blob.size),
-    "Cache-Control": "private, max-age=3600",
+    "Cache-Control": "private, no-cache",
     "Content-Disposition": `inline; filename="${nodeId}"`,
   });
   if (result.blob.etag) headers.set("ETag", result.blob.etag);
